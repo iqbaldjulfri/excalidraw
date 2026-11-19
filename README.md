@@ -1,3 +1,18 @@
+# Excalidraw for company use
+
+This is [Excalidraw](https://github.com/excalidraw/excalidraw) with Google integration, for running inside a company. The editor is the same; what changes is who can use it and where drawings are kept:
+
+- **Company sign-in.** People sign in with their Google Workspace account, and only accounts in your company's domain get in.
+- **Google Drive sync.** Drawings autosave to each person's Google Drive. They can open any drawing from their Drive and choose the folder new drawings go to. Edits made on another device merge in.
+- **Your drawings stay in-house.** Live collaboration, share links and images are stored on your own server instead of Excalidraw's public services, and only signed-in coworkers can open them. The shape library is the exception: "Browse libraries" and "Publish library" still use Excalidraw's public library site, and publishing sends the library there.
+- **No Excalidraw+ or AI features.** They would send drawings to Excalidraw's servers, so this build hides them.
+
+To run it, see [`deploy/README.md`](deploy/README.md). The Google Cloud setup and server settings are in [`server/README.md`](server/README.md).
+
+Everything below is the upstream Excalidraw README.
+
+---
+
 <a href="https://excalidraw.com/" target="_blank" rel="noopener">
   <picture>
     <source media="(prefers-color-scheme: dark)" alt="Excalidraw" srcset="https://excalidraw.nyc3.cdn.digitaloceanspaces.com/github/excalidraw_github_cover_2_dark.png" />

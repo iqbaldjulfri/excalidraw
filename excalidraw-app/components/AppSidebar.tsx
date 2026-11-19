@@ -5,6 +5,12 @@ import {
 } from "@excalidraw/excalidraw/components/icons";
 import { LinkButton } from "@excalidraw/excalidraw/components/LinkButton";
 import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
+import { useI18n } from "@excalidraw/excalidraw/i18n";
+
+import { isSelfHosted } from "../app_constants";
+import { isGoogleDriveEnabled } from "../data/googleDrive/auth";
+
+import { DriveSidebarTab, driveIcon } from "./DriveSidebarTab";
 
 import "./AppSidebar.scss";
 
@@ -67,65 +73,89 @@ const SidebarPromoCopy = (props: SidebarPromoCopyProps) => {
 
 export const AppSidebar = () => {
   const { theme, openSidebar } = useUIAppState();
+  const { t } = useI18n();
+  const isDriveEnabled = isGoogleDriveEnabled();
 
   return (
     <DefaultSidebar>
       <DefaultSidebar.TabTriggers>
-        <Sidebar.TabTrigger
-          tab="comments"
-          style={{ opacity: openSidebar?.tab === "comments" ? 1 : 0.4 }}
-        >
-          {messageCircleIcon}
-        </Sidebar.TabTrigger>
-        <Sidebar.TabTrigger
-          tab="presentation"
-          style={{ opacity: openSidebar?.tab === "presentation" ? 1 : 0.4 }}
-        >
-          {presentationIcon}
-        </Sidebar.TabTrigger>
+        {isDriveEnabled && (
+          <Sidebar.TabTrigger
+            tab="googleDrive"
+            title={t("googleDrive.tab")}
+            style={{ opacity: openSidebar?.tab === "googleDrive" ? 1 : 0.4 }}
+          >
+            {driveIcon}
+          </Sidebar.TabTrigger>
+        )}
+        {!isSelfHosted && (
+          <>
+            <Sidebar.TabTrigger
+              tab="comments"
+              style={{ opacity: openSidebar?.tab === "comments" ? 1 : 0.4 }}
+            >
+              {messageCircleIcon}
+            </Sidebar.TabTrigger>
+            <Sidebar.TabTrigger
+              tab="presentation"
+              style={{ opacity: openSidebar?.tab === "presentation" ? 1 : 0.4 }}
+            >
+              {presentationIcon}
+            </Sidebar.TabTrigger>
+          </>
+        )}
       </DefaultSidebar.TabTriggers>
-      <Sidebar.Tab tab="comments">
-        <div className="app-sidebar-promo-container">
-          <div
-            className="app-sidebar-promo-image"
-            style={{
-              ["--image-source" as any]: `url(/sidebar-comments-promo-${
-                theme === THEME.DARK ? "dark" : "light"
-              }.jpg)`,
-              opacity: 0.9,
-            }}
-          />
-          <SidebarPromoCopy text="Make comments with Excalidraw+" />
-          <LinkButton
-            href={`${
-              import.meta.env.VITE_APP_PLUS_LP
-            }/plus?utm_source=excalidraw&utm_medium=app&utm_content=comments_promo#excalidraw-redirect`}
-          >
-            Sign up now
-          </LinkButton>
-        </div>
-      </Sidebar.Tab>
-      <Sidebar.Tab tab="presentation" className="px-3">
-        <div className="app-sidebar-promo-container">
-          <div
-            className="app-sidebar-promo-image"
-            style={{
-              ["--image-source" as any]: `url(/sidebar-presentation-promo-${
-                theme === THEME.DARK ? "dark" : "light"
-              }.jpg)`,
-              opacity: 0.7,
-            }}
-          />
-          <SidebarPromoCopy text="Create presentation with Excalidraw+" />
-          <LinkButton
-            href={`${
-              import.meta.env.VITE_APP_PLUS_LP
-            }/plus?utm_source=excalidraw&utm_medium=app&utm_content=presentations_promo#excalidraw-redirect`}
-          >
-            Sign up now
-          </LinkButton>
-        </div>
-      </Sidebar.Tab>
+      {isDriveEnabled && (
+        <Sidebar.Tab tab="googleDrive">
+          <DriveSidebarTab />
+        </Sidebar.Tab>
+      )}
+      {!isSelfHosted && (
+        <>
+          <Sidebar.Tab tab="comments">
+            <div className="app-sidebar-promo-container">
+              <div
+                className="app-sidebar-promo-image"
+                style={{
+                  ["--image-source" as any]: `url(/sidebar-comments-promo-${
+                    theme === THEME.DARK ? "dark" : "light"
+                  }.jpg)`,
+                  opacity: 0.9,
+                }}
+              />
+              <SidebarPromoCopy text="Make comments with Excalidraw+" />
+              <LinkButton
+                href={`${
+                  import.meta.env.VITE_APP_PLUS_LP
+                }/plus?utm_source=excalidraw&utm_medium=app&utm_content=comments_promo#excalidraw-redirect`}
+              >
+                Sign up now
+              </LinkButton>
+            </div>
+          </Sidebar.Tab>
+          <Sidebar.Tab tab="presentation" className="px-3">
+            <div className="app-sidebar-promo-container">
+              <div
+                className="app-sidebar-promo-image"
+                style={{
+                  ["--image-source" as any]: `url(/sidebar-presentation-promo-${
+                    theme === THEME.DARK ? "dark" : "light"
+                  }.jpg)`,
+                  opacity: 0.7,
+                }}
+              />
+              <SidebarPromoCopy text="Create presentation with Excalidraw+" />
+              <LinkButton
+                href={`${
+                  import.meta.env.VITE_APP_PLUS_LP
+                }/plus?utm_source=excalidraw&utm_medium=app&utm_content=presentations_promo#excalidraw-redirect`}
+              >
+                Sign up now
+              </LinkButton>
+            </div>
+          </Sidebar.Tab>
+        </>
+      )}
     </DefaultSidebar>
   );
 };

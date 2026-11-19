@@ -59,3 +59,9 @@ export const COOKIES = {
 export const isExcalidrawPlusSignedUser = document.cookie.includes(
   COOKIES.AUTH_STATE_COOKIE,
 );
+
+/**
+ * A company's own deployment: hides Excalidraw+ and the AI features, which
+ * would send drawings to Excalidraw's servers or advertise its product.
+ */
+export const isSelfHosted = import.meta.env.VITE_APP_SELF_HOSTED === "true";

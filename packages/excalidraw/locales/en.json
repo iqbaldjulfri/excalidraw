@@ -796,5 +796,55 @@
     "excalidrawPlusMcp": "Excalidraw+ MCP",
     "cli": "Excalidraw CLI",
     "cliTagline": "for humans & AI"
+  },
+  "googleDrive": {
+    "title": "Google Drive",
+    "tab": "Google Drive",
+    "notLinked": "This canvas isn't saved to Drive yet.",
+    "connecting": "Connecting to Google Drive…",
+    "signedOut": "Your session has ended. Your changes are kept in this browser and sync once you sign in again.",
+    "driveNotGranted": "Google Drive access wasn't allowed when you signed in. Sign in again and tick Google Drive on Google's consent screen.",
+    "signedInAs": "Signed in as {{email}}",
+    "status": {
+      "syncing": "Saving…",
+      "synced": "Saved {{time}}",
+      "waiting": "Not saved yet",
+      "error": "Couldn't save"
+    },
+    "actions": {
+      "newDrawing": "New drawing",
+      "saveCanvas": "Save canvas to Drive",
+      "stopSyncing": "Stop syncing",
+      "rename": "Rename",
+      "trash": "Move to Drive trash",
+      "signOut": "Sign out",
+      "signInAgain": "Sign in again",
+      "retry": "Try again",
+      "openFromDrive": "Open from Drive…",
+      "changeFolder": "Change"
+    },
+    "list": {
+      "current": "Open now",
+      "empty": "No drawings in Drive yet."
+    },
+    "replaceCanvas": {
+      "title": "Replace this canvas?",
+      "description": "Your current canvas isn't saved to Google Drive. Opening another drawing replaces it.",
+      "button": "Replace canvas"
+    },
+    "toasts": {
+      "canvasReplaced": "The canvas was replaced, so it no longer syncs to \"{{name}}\". That drawing is unchanged in Drive."
+    },
+    "errors": {
+      "fileMissing": "\"{{name}}\" is no longer in Drive, so this canvas stopped syncing to it.",
+      "connectFailed": "Couldn't connect to Google Drive.",
+      "pickerUnavailable": "The Drive picker isn't set up on this server.",
+      "readOnly": "You can only view \"{{name}}\" in Drive, so changes couldn't be saved to it. Ask its owner for edit access, or make a copy in Drive and open that."
+    },
+    "saveFolder": "New drawings are saved to {{name}}",
+    "picker": {
+      "openTitle": "Open an Excalidraw drawing",
+      "folderTitle": "Choose where new drawings are saved"
+    }
   }
 }

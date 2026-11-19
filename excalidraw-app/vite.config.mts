@@ -149,6 +149,24 @@ export default defineConfig(({ mode }) => {
       port: Number(envVars.VITE_APP_PORT || 3000),
       // open the browser
       open: true,
+      // the production reverse proxy routes /auth to the auth server; mirror
+      // that locally, keeping Host so cookies and the logout origin check match
+      proxy:
+        envVars.VITE_APP_AUTH_ENABLED === "true"
+          ? {
+              // trailing slash: a bare "/auth" also catches modules like
+              // /authors.ts. Not a "^" regex: vite-plugin-html exempts proxy
+              // keys from its HTML fallback only by literal path prefix.
+              "/auth/": {
+                target: envVars.VITE_APP_AUTH_DEV_PROXY || "http://localhost:3015",
+                changeOrigin: false,
+              },
+              "/api/": {
+                target: envVars.VITE_APP_AUTH_DEV_PROXY || "http://localhost:3015",
+                changeOrigin: false,
+              },
+            }
+          : undefined,
     },
     // We need to specify the envDir since now there are no
     //more located in parallel with the vite.config.ts file but in parent dir
