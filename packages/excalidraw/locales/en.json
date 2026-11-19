@@ -796,5 +796,47 @@
     "excalidrawPlusMcp": "Excalidraw+ MCP",
     "cli": "Excalidraw CLI",
     "cliTagline": "for humans & AI"
+  },
+  "googleDrive": {
+    "title": "Google Drive",
+    "tab": "Google Drive",
+    "intro": "Keep your drawings in Google Drive. Each drawing autosaves to its own file, and edits made on other devices merge in when you come back.",
+    "notLinked": "This canvas isn't saved to Drive yet.",
+    "status": {
+      "syncing": "Saving…",
+      "synced": "Saved {{time}}",
+      "waiting": "Not saved yet",
+      "error": "Couldn't save"
+    },
+    "actions": {
+      "connect": "Connect Google Drive",
+      "reconnect": "Reconnect Google Drive",
+      "newDrawing": "New drawing",
+      "saveCanvas": "Save canvas to Drive",
+      "stopSyncing": "Stop syncing",
+      "rename": "Rename",
+      "trash": "Move to Drive trash",
+      "signOut": "Disconnect Google Drive"
+    },
+    "reconnect": {
+      "description": "Your Google session has ended. Reconnect to keep syncing.",
+      "withDrawing": "Your Google session has ended. Changes to \"{{name}}\" are kept in this browser and sync when you reconnect."
+    },
+    "list": {
+      "current": "Open now",
+      "empty": "No drawings in Drive yet."
+    },
+    "replaceCanvas": {
+      "title": "Replace this canvas?",
+      "description": "Your current canvas isn't saved to Google Drive. Opening another drawing replaces it.",
+      "button": "Replace canvas"
+    },
+    "toasts": {
+      "canvasReplaced": "The canvas was replaced, so it no longer syncs to \"{{name}}\". That drawing is unchanged in Drive."
+    },
+    "errors": {
+      "sessionExpired": "Your Google session has ended. Reconnect to keep syncing.",
+      "fileMissing": "\"{{name}}\" is no longer in Drive, so this canvas stopped syncing to it."
+    }
   }
 }

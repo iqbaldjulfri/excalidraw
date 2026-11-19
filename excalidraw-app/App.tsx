@@ -131,6 +131,7 @@ import {
   localStorageQuotaExceededAtom,
 } from "./data/LocalData";
 import { isBrowserStorageStateNewer } from "./data/tabSync";
+import { driveSync } from "./data/googleDrive/DriveSync";
 import { ShareDialog, shareDialogStateAtom } from "./share/ShareDialog";
 import CollabError, { collabErrorIndicatorAtom } from "./collab/CollabError";
 import { useHandleAppTheme } from "./useHandleAppTheme";
@@ -566,6 +567,9 @@ const ExcalidrawWrapper = () => {
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
       loadImages(data, /* isInitialLoad */ true);
       initialStatePromiseRef.current.promise.resolve(data.scene);
+      driveSync.init(excalidrawAPI, {
+        isExternalScene: data.isExternalScene,
+      });
     });
 
     const onHashChange = async (event: HashChangeEvent) => {
@@ -581,6 +585,9 @@ const ExcalidrawWrapper = () => {
         excalidrawAPI.updateScene({ appState: { isLoading: true } });
 
         initializeScene({ collabAPI, excalidrawAPI }).then((data) => {
+          if (data.isExternalScene) {
+            driveSync.onExternalSceneLoaded();
+          }
           loadImages(data);
           if (data.scene) {
             excalidrawAPI.updateScene({
@@ -620,6 +627,8 @@ const ExcalidrawWrapper = () => {
             }
           });
           collabAPI?.setUsername(username || "");
+          // only after the canvas above matches the link another tab wrote
+          driveSync.reloadLinkFromStorage();
         }
 
         if (isBrowserStorageStateNewer(STORAGE_KEYS.VERSION_FILES)) {
@@ -651,6 +660,7 @@ const ExcalidrawWrapper = () => {
               });
           }
         }
+        driveSync.syncNow();
       }
     }, SYNC_BROWSER_TABS_TIMEOUT);
 
@@ -721,6 +731,8 @@ const ExcalidrawWrapper = () => {
     if (collabAPI?.isCollaborating()) {
       collabAPI.syncElements(elements);
     }
+
+    driveSync.onSceneChange(elements);
 
     // this check is redundant, but since this is a hot path, it's best
     // not to evaludate the nested expression every time
