@@ -1,5 +1,13 @@
 import { createSign, generateKeyPairSync } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +16,7 @@ import { createAuthApp, sanitizeReturnTo, SESSION_COOKIE } from "./app";
 import { DRIVE_FILE_SCOPE, GOOGLE_ENDPOINTS, GoogleOAuth } from "./google";
 import { FileSessionStore } from "./sessions";
 import { DiskStorage } from "./storage";
+import { DailyUploadQuota } from "./storageRoutes";
 
 import type { Config } from "./config";
 import type { AddressInfo } from "node:net";
@@ -598,6 +607,7 @@ describe("storage API", () => {
         "/api/rooms/room1",
         auth({
           method: "PUT",
+          headers: { "x-room-writer-token": "writer-a" },
           body: JSON.stringify({ scene, expectedRevision }),
         }),
       );
@@ -622,6 +632,7 @@ describe("storage API", () => {
             "/api/rooms/room2",
             auth({
               method: "PUT",
+              headers: { "x-room-writer-token": "writer-a" },
               body: JSON.stringify({ scene, expectedRevision: null }),
             }),
           )
@@ -631,6 +642,60 @@ describe("storage API", () => {
 
     expect(statuses.filter((status) => status === 200)).toHaveLength(1);
     expect(statuses.filter((status) => status === 409)).toHaveLength(4);
+  });
+
+  it("only lets holders of the room key save over a room", async () => {
+    const auth = await signedIn();
+    const scene = { sceneVersion: 1, iv: "aXY=", ciphertext: "Y3Q=" };
+    const put = (token: string | null, expectedRevision: number | null) =>
+      ctx.request(
+        "/api/rooms/room3",
+        auth({
+          method: "PUT",
+          headers: token ? { "x-room-writer-token": token } : {},
+          body: JSON.stringify({ scene, expectedRevision }),
+        }),
+      );
+
+    expect((await put("key-holder", null)).status).toBe(200);
+    expect((await put("someone-else", 1)).status).toBe(403);
+    expect((await put(null, 1)).status).toBe(400);
+    expect((await put("key-holder", 1)).status).toBe(200);
+    // the pinned token isn't handed out to readers
+    expect(
+      await (await ctx.request("/api/rooms/room3", auth())).json(),
+    ).not.toHaveProperty("writerHash");
+  });
+
+  it("keeps stored drawings readable only by the server's user", async () => {
+    const auth = await signedIn();
+    const { id } = await (
+      await ctx.request("/api/v2/post/", auth({ method: "POST", body: "a" }))
+    ).json();
+    const dir = path.join(ctx.dataDir, "storage", "shareLinks", id);
+
+    expect((await stat(dir)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(dir, "scene"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("removes temp files left by crashed writes once they're an hour old", async () => {
+    const auth = await signedIn();
+    const { id } = await (
+      await ctx.request("/api/v2/post/", auth({ method: "POST", body: "a" }))
+    ).json();
+    const dir = path.join(ctx.dataDir, "storage", "shareLinks", id);
+    await writeFile(path.join(dir, "scene.old.tmp"), "x");
+    await writeFile(path.join(dir, "scene.new.tmp"), "x");
+    const twoHoursAgo = new Date(Date.now() - 2 * HOUR);
+    await utimes(path.join(dir, "scene.old.tmp"), twoHoursAgo, twoHoursAgo);
+
+    await ctx.storage.deleteUnused(180 * 24 * HOUR);
+
+    expect((await readdir(dir)).sort()).toEqual([
+      ".last-access",
+      "scene",
+      "scene.new.tmp",
+    ]);
   });
 
   it("keeps the first upload of an image", async () => {
@@ -699,5 +764,19 @@ describe("storage API", () => {
       await ctx.storage.readFile("shareLinks", unused.id, "img"),
     ).toBeNull();
     expect(await ctx.storage.readShareLink(used.id)).not.toBeNull();
+  });
+});
+
+describe("DailyUploadQuota", () => {
+  it("caps each user's uploads per day and resets the next day", () => {
+    let time = Date.UTC(2026, 10, 19, 10);
+    const quota = new DailyUploadQuota(100, () => time);
+
+    quota.consume("alice", 60);
+    expect(() => quota.consume("alice", 50)).toThrow();
+    quota.consume("bob", 100);
+
+    time += 24 * HOUR;
+    expect(() => quota.consume("alice", 100)).not.toThrow();
   });
 });

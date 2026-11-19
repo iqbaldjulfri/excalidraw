@@ -1,4 +1,8 @@
-import { StorageConflictError, isValidId } from "./storage";
+import {
+  RoomWriteForbiddenError,
+  StorageConflictError,
+  isValidId,
+} from "./storage";
 
 import type { DiskStorage, OwnerKind, StoredRoomScene } from "./storage";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -10,7 +14,35 @@ const MAX_SHARE_LINK_BYTES = 10 * MiB;
 // room snapshots travel as base64 JSON, a third bigger than the bytes
 const MAX_ROOM_BYTES = 15 * MiB;
 
+// share links and images only ever add data, so they're what can fill the disk
+const DAILY_UPLOAD_BYTES_PER_USER = 1024 * MiB;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 class PayloadTooLargeError extends Error {}
+class QuotaExceededError extends Error {}
+
+/**
+ * Per-user upload budget, in memory: it resets when the server restarts,
+ * which is fine for stopping a runaway script, its purpose.
+ */
+export class DailyUploadQuota {
+  private readonly used = new Map<string, { day: number; bytes: number }>();
+
+  constructor(
+    private readonly limitBytes = DAILY_UPLOAD_BYTES_PER_USER,
+    private readonly now = () => Date.now(),
+  ) {}
+
+  consume(user: string, bytes: number) {
+    const day = Math.floor(this.now() / DAY_MS);
+    const entry = this.used.get(user);
+    const usedToday = entry?.day === day ? entry.bytes : 0;
+    if (usedToday + bytes > this.limitBytes) {
+      throw new QuotaExceededError();
+    }
+    this.used.set(user, { day, bytes: usedToday + bytes });
+  }
+}
 
 /**
  * Rejects oversized bodies but keeps draining them: destroying the request
@@ -82,8 +114,9 @@ export const handleStorageRequest = async (
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
-  storage: DiskStorage,
+  deps: { storage: DiskStorage; quota: DailyUploadQuota; user: string },
 ) => {
+  const { storage, quota, user } = deps;
   const parts = url.pathname.split("/").filter(Boolean).slice(1);
   const method = req.method;
 
@@ -91,6 +124,7 @@ export const handleStorageRequest = async (
     if (parts[0] === "v2") {
       if (method === "POST" && parts[1] === "post" && parts.length === 2) {
         const body = await readBody(req, MAX_SHARE_LINK_BYTES);
+        quota.consume(user, body.length);
         return sendJSON(res, 200, { id: await storage.createShareLink(body) });
       }
       if (method === "GET" && parts.length === 2 && isValidId(parts[1])) {
@@ -108,6 +142,10 @@ export const handleStorageRequest = async (
           : sendJSON(res, 404, { error: "not_found" });
       }
       if (method === "PUT") {
+        const writerToken = req.headers["x-room-writer-token"];
+        if (typeof writerToken !== "string" || !isValidId(writerToken)) {
+          return sendJSON(res, 400, { error: "missing_writer_token" });
+        }
         const body = JSON.parse(
           (await readBody(req, MAX_ROOM_BYTES)).toString("utf8"),
         );
@@ -124,6 +162,7 @@ export const handleStorageRequest = async (
           roomId,
           body.scene,
           body.expectedRevision,
+          writerToken,
         );
         return sendJSON(res, 200, { revision });
       }
@@ -138,12 +177,9 @@ export const handleStorageRequest = async (
       isValidId(parts[3])
     ) {
       if (method === "PUT") {
-        await storage.saveFile(
-          kind,
-          parts[2],
-          parts[3],
-          await readBody(req, MAX_FILE_BYTES),
-        );
+        const body = await readBody(req, MAX_FILE_BYTES);
+        quota.consume(user, body.length);
+        await storage.saveFile(kind, parts[2], parts[3], body);
         res.writeHead(204).end();
         return;
       }
@@ -165,6 +201,12 @@ export const handleStorageRequest = async (
     }
     if (error instanceof StorageConflictError) {
       return sendJSON(res, 409, { error: "conflict" });
+    }
+    if (error instanceof RoomWriteForbiddenError) {
+      return sendJSON(res, 403, { error: "not_room_writer" });
+    }
+    if (error instanceof QuotaExceededError) {
+      return sendJSON(res, 429, { error: "daily_upload_limit" });
     }
     if (error instanceof SyntaxError) {
       return sendJSON(res, 400, { error: "invalid_json" });

@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import { randomToken } from "./crypto";
+import { randomToken, safeEqual, sha256Hex } from "./crypto";
 
 /**
  * Everything is stored end-to-end encrypted by the browser; this server never
@@ -24,6 +24,23 @@ export type StoredRoomScene = {
   iv: string;
   ciphertext: string;
 };
+
+/** The writer token doesn't match the one the room was created with. */
+export class RoomWriteForbiddenError extends Error {
+  constructor() {
+    super("Only holders of the room key can save this room");
+    this.name = "RoomWriteForbiddenError";
+  }
+}
+
+type StoredRoom = {
+  scene: StoredRoomScene;
+  revision: number;
+  /** Hash of a token derived from the room key; pinned by the first save. */
+  writerHash?: string;
+};
+
+const TEMP_FILE_MAX_AGE_MS = 60 * 60 * 1000;
 
 export class StorageConflictError extends Error {
   constructor() {
@@ -54,10 +71,12 @@ export class DiskStorage {
     return path.join(this.root, kind, ownerId);
   }
 
+  // owner-only modes: the data is encrypted, but room ids, sizes and access
+  // times still say who works with whom
   private async writeAtomic(file: string, data: Uint8Array | string) {
-    await mkdir(path.dirname(file), { recursive: true });
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     const temp = `${file}.${randomToken(6)}.tmp`;
-    await writeFile(temp, data);
+    await writeFile(temp, data, { mode: 0o600 });
     await rename(temp, file);
   }
 
@@ -67,8 +86,8 @@ export class DiskStorage {
     try {
       await utimes(marker, time, time);
     } catch {
-      await mkdir(path.dirname(marker), { recursive: true });
-      await writeFile(marker, "");
+      await mkdir(path.dirname(marker), { recursive: true, mode: 0o700 });
+      await writeFile(marker, "", { mode: 0o600 });
       await utimes(marker, time, time);
     }
   }
@@ -108,10 +127,7 @@ export class DiskStorage {
 
   // --- collab rooms --------------------------------------------------------
 
-  /** Revisions let concurrent savers detect each other, like a transaction. */
-  async readRoom(
-    roomId: string,
-  ): Promise<{ scene: StoredRoomScene; revision: number } | null> {
+  private async readStoredRoom(roomId: string): Promise<StoredRoom | null> {
     const raw = await this.readOptional(
       path.join(this.ownerDir("rooms", roomId), SCENE_FILE),
     );
@@ -122,25 +138,43 @@ export class DiskStorage {
     return JSON.parse(raw.toString("utf8"));
   }
 
+  /** Revisions let concurrent savers detect each other, like a transaction. */
+  async readRoom(
+    roomId: string,
+  ): Promise<{ scene: StoredRoomScene; revision: number } | null> {
+    const room = await this.readStoredRoom(roomId);
+    return room ? { scene: room.scene, revision: room.revision } : null;
+  }
+
   /**
    * Saves only if the stored revision still equals `expectedRevision`
    * (null: the room must not exist yet). Returns the new revision.
+   *
+   * `writerToken` is derived from the room key in the browser. Without it,
+   * anyone who learned a room id could overwrite the snapshot with data
+   * nobody can decrypt, breaking the room for everyone in it.
    */
   writeRoom(
     roomId: string,
     scene: StoredRoomScene,
     expectedRevision: number | null,
+    writerToken: string,
   ): Promise<number> {
     const previous = this.roomLocks.get(roomId) ?? Promise.resolve();
     const run = async () => {
-      const current = await this.readRoom(roomId);
+      const current = await this.readStoredRoom(roomId);
+      const writerHash = sha256Hex(writerToken);
+      if (current?.writerHash && !safeEqual(writerHash, current.writerHash)) {
+        throw new RoomWriteForbiddenError();
+      }
       if ((current?.revision ?? null) !== expectedRevision) {
         throw new StorageConflictError();
       }
       const revision = (current?.revision ?? 0) + 1;
+      const stored: StoredRoom = { scene, revision, writerHash };
       await this.writeAtomic(
         path.join(this.ownerDir("rooms", roomId), SCENE_FILE),
-        JSON.stringify({ scene, revision }),
+        JSON.stringify(stored),
       );
       await this.touch("rooms", roomId);
       return revision;
@@ -198,7 +232,10 @@ export class DiskStorage {
 
   // --- expiry ----------------------------------------------------------------
 
-  /** Deletes share links and rooms, with their images, unused for `maxIdleMs`. */
+  /**
+   * Deletes share links and rooms, with their images, unused for `maxIdleMs`,
+   * and temp files left by writes that crashed.
+   */
   async deleteUnused(maxIdleMs: number) {
     let removed = 0;
     for (const kind of ["shareLinks", "rooms"] as const) {
@@ -213,14 +250,39 @@ export class DiskStorage {
         const lastAccess = await stat(path.join(dir, ACCESS_MARKER)).then(
           (stats) => stats.mtimeMs,
           // no marker: a write crashed half-way; fall back to the folder
-          () => stat(dir).then((stats) => stats.mtimeMs),
+          () =>
+            stat(dir).then(
+              (stats) => stats.mtimeMs,
+              () => null,
+            ),
         );
+        if (lastAccess === null) {
+          continue;
+        }
         if (this.now() - lastAccess > maxIdleMs) {
           await rm(dir, { recursive: true, force: true });
           removed++;
+        } else {
+          await this.deleteStaleTempFiles(dir);
+          await this.deleteStaleTempFiles(path.join(dir, "files"));
         }
       }
     }
     return removed;
+  }
+
+  private async deleteStaleTempFiles(dir: string) {
+    const names = await readdir(dir).catch(() => [] as string[]);
+    for (const name of names.filter((name) => name.endsWith(".tmp"))) {
+      const file = path.join(dir, name);
+      const modified = await stat(file).then(
+        (stats) => stats.mtimeMs,
+        () => null,
+      );
+      // younger ones may belong to a write still in progress
+      if (modified !== null && Date.now() - modified > TEMP_FILE_MAX_AGE_MS) {
+        await rm(file, { force: true });
+      }
+    }
   }
 }

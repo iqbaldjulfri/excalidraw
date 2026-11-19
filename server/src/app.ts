@@ -7,7 +7,7 @@ import {
 } from "./crypto";
 import { DRIVE_FILE_SCOPE, GrantRevokedError } from "./google";
 import { isSessionExpired } from "./sessions";
-import { handleStorageRequest } from "./storageRoutes";
+import { DailyUploadQuota, handleStorageRequest } from "./storageRoutes";
 
 import type { Config } from "./config";
 import type { GoogleOAuth } from "./google";
@@ -129,6 +129,7 @@ export const createAuthApp = (deps: AuthAppDeps) => {
   const { config, google, sessions } = deps;
   const now = () => (deps.now ?? Date.now)();
   const refreshes = new Map<string, Promise<SessionData | null>>();
+  const uploadQuota = new DailyUploadQuota(undefined, now);
   // without this, every request during a Google outage would retry and wait
   const failedReverifyAt = new Map<string, number>();
 
@@ -521,7 +522,8 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     res: ServerResponse,
     storage: DiskStorage,
   ) => {
-    if (!(await authenticate(req))) {
+    const session = await authenticate(req);
+    if (!session) {
       sendJSON(res, 401, { error: "signed_out" });
       return;
     }
@@ -534,7 +536,11 @@ export const createAuthApp = (deps: AuthAppDeps) => {
       sendJSON(res, 403, { error: "bad_origin" });
       return;
     }
-    await handleStorageRequest(req, res, url, storage);
+    await handleStorageRequest(req, res, url, {
+      storage,
+      quota: uploadQuota,
+      user: session.data.user.sub,
+    });
   };
 
   return async (req: IncomingMessage, res: ServerResponse) => {

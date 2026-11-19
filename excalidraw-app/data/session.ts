@@ -13,7 +13,8 @@ export type CurrentUser = {
 /** The auth server's session is gone; only a new sign-in fixes it. */
 export class SignedOutError extends Error {
   constructor() {
-    super("Signed out");
+    // collab shows this text as-is
+    super("Your session has ended. Reload the page to sign in again.");
     this.name = "SignedOutError";
   }
 }

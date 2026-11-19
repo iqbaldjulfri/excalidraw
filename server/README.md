@@ -6,11 +6,12 @@ Signs people in with Google, admits only accounts from one Google Workspace doma
 
 The reverse proxy serves everything from one domain and asks this server about each request before passing it on:
 
-| Path            | Goes to                         | Gated by `/auth/check` |
-| --------------- | ------------------------------- | ---------------------- |
-| `/auth/*`       | this server                     | no                     |
-| `/socket.io/*`  | `excalidraw-room` (live collab) | yes                    |
-| everything else | the built app (static files)    | yes                    |
+| Path | Goes to | Gated by `/auth/check` |
+| --- | --- | --- |
+| `/auth/*` | this server | no |
+| `/api/*` | this server (stored drawings) | optional: it checks the session itself |
+| `/socket.io/*` | `excalidraw-room` (live collab) | yes |
+| everything else | the built app (static files) | yes |
 
 `GET /auth/check` answers `200` with an `X-Auth-Email` header for a signed-in user. For a signed-out page load (`GET` with `Accept: text/html`) it answers `401` with a small page whose script sends the browser to sign-in. A script is used because collab and share links keep their key in the URL `#fragment`, which never reaches a server. For anything else it answers a bare `401`. The proxy must pass these responses through to the browser. It reads the original method and path from `X-Forwarded-Method` and `X-Forwarded-Uri`.
 
@@ -57,7 +58,7 @@ This server also replaces Firebase and the public share-link backend, so drawing
 | `GET`/`PUT /api/rooms/<roomId>` | The latest snapshot of a collab room. A save must name the revision it started from, so two collaborators saving at once can't overwrite each other |
 | `GET`/`PUT /api/files/<rooms or shareLinks>/<id>/<fileId>` | Images, stored with the room or link they belong to. The first upload of an image id is kept |
 
-Every request needs a signed-in session, checked by this server itself. Once an hour it deletes share links and rooms that nobody has opened for `RETENTION_DAYS`, along with their images. Nothing is backed up.
+Every request needs a signed-in session, checked by this server itself. Saving a room also needs a token the browser derives from the room key, pinned by the room's first save, so a coworker who only knows a room's id can't overwrite it. Each user may upload up to 1 GiB of share links and images per day (counted in memory, reset on restart) so a runaway script can't fill the disk. Once an hour it deletes share links and rooms that nobody has opened for `RETENTION_DAYS`, along with their images. Nothing is backed up.
 
 Build the app with `VITE_APP_STORAGE_URL=/api`, `VITE_APP_BACKEND_V2_GET_URL=/api/v2/` and `VITE_APP_BACKEND_V2_POST_URL=/api/v2/post/` to use it.
 

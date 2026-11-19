@@ -8,6 +8,8 @@ import type { AppState } from "@excalidraw/excalidraw/types";
 
 import { loadFromHttp, saveFilesToHttp, saveToHttp } from "../data/httpStorage";
 
+import { SignedOutError } from "../data/session";
+
 import type Portal from "../collab/Portal";
 import type { SyncableExcalidrawElement } from "../data";
 
@@ -16,10 +18,15 @@ type Room = { scene: unknown; revision: number };
 const createFakeServer = () => {
   const rooms = new Map<string, Room>();
   const puts: string[] = [];
-  let beforeNextPut: (() => void) | null = null;
+  const writerTokens: string[] = [];
+  let status: number | null = null;
+  let beforeNextPut: (() => Promise<unknown>) | null = null;
 
   const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
+    if (status) {
+      return new Response(null, { status });
+    }
     const room = url.match(/^\/api\/rooms\/(.+)$/)?.[1];
     if (room && method === "GET") {
       const stored = rooms.get(room);
@@ -28,8 +35,10 @@ const createFakeServer = () => {
         : Response.json({ error: "not_found" }, { status: 404 });
     }
     if (room && method === "PUT") {
-      beforeNextPut?.();
+      const interleaved = beforeNextPut;
       beforeNextPut = null;
+      await interleaved?.();
+      writerTokens.push(new Headers(init.headers).get("X-Room-Writer-Token")!);
       const body = JSON.parse(String(init.body));
       const current = rooms.get(room)?.revision ?? null;
       if (current !== body.expectedRevision) {
@@ -48,9 +57,13 @@ const createFakeServer = () => {
   return {
     rooms,
     puts,
+    writerTokens,
     fetchMock,
-    /** Runs between our read and our write, like another collaborator. */
-    interleave: (fn: () => void) => {
+    failWith: (code: number) => {
+      status = code;
+    },
+    /** Completes before our next write is checked, like a faster collaborator. */
+    interleave: (fn: () => Promise<unknown>) => {
       beforeNextPut = fn;
     },
   };
@@ -111,17 +124,15 @@ describe("httpStorage", () => {
     } as unknown as Portal;
     await saveToHttp(portal, scene(element("a", 1)), {} as AppState);
 
-    // a collaborator saves their element while we're saving ours
-    let theirs: Promise<unknown> = Promise.resolve();
-    server.interleave(() => {
-      theirs = saveToHttp(other, scene(element("b", 1)), {} as AppState);
-    });
+    // a collaborator's save lands between our read and our write
+    server.interleave(() =>
+      saveToHttp(other, scene(element("b", 1)), {} as AppState),
+    );
     await saveToHttp(
       portal,
       scene(element("a", 2), element("c", 1)),
       {} as AppState,
     );
-    await theirs;
 
     const loaded = await loadFromHttp("room1", portal.roomKey!, null);
     // nothing lost to the race; b and c share an index, so the merge
@@ -131,8 +142,7 @@ describe("httpStorage", () => {
     const roomPuts = server.fetchMock.mock.calls.filter(
       ([url, init]) => url === "/api/rooms/room1" && init?.method === "PUT",
     );
-    // their save read the room before ours landed, so its first write hit a
-    // conflict and it retried: first save, ours, their conflict, their retry
+    // first save, their save, our conflicted write, our merged retry
     expect(roomPuts).toHaveLength(4);
     const statuses = await Promise.all(
       server.fetchMock.mock.results.map(
@@ -140,6 +150,41 @@ describe("httpStorage", () => {
       ),
     );
     expect(statuses).toContain(409);
+  });
+
+  it("proves it holds the room key with a token that never contains it", async () => {
+    await saveToHttp(portal, scene(element("a", 1)), {} as AppState);
+    await saveToHttp(portal, scene(element("a", 2)), {} as AppState);
+
+    const [first, second] = server.writerTokens;
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).toBe(first);
+    expect(first).not.toContain(portal.roomKey);
+  });
+
+  it("reports an ended session so the user knows to sign in again", async () => {
+    server.failWith(401);
+
+    await expect(loadFromHttp("room1", portal.roomKey!, null)).rejects.toThrow(
+      SignedOutError,
+    );
+    await expect(
+      saveFilesToHttp({
+        prefix: "/files/shareLinks/link1",
+        files: [{ id: "img" as FileId, buffer: new Uint8Array([1]) }],
+      }),
+    ).rejects.toThrow(SignedOutError);
+  });
+
+  it("fails a share link's image upload when no image reached the server", async () => {
+    server.failWith(503);
+
+    await expect(
+      saveFilesToHttp({
+        prefix: "/files/shareLinks/link1",
+        files: [{ id: "img" as FileId, buffer: new Uint8Array([1]) }],
+      }),
+    ).rejects.toThrow();
   });
 
   it("uploads images under the room or share link they belong to", async () => {

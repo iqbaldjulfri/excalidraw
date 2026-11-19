@@ -26,6 +26,8 @@ import type {
   DataURL,
 } from "@excalidraw/excalidraw/types";
 
+import { SignedOutError } from "./session";
+
 import { getSyncableElements } from ".";
 
 import type { SyncableExcalidrawElement } from ".";
@@ -102,6 +104,20 @@ class SceneVersionCache {
   };
 }
 
+/**
+ * Proves to the server that we hold the room key without sending it: the
+ * server pins this hash on the first save and refuses saves without it.
+ */
+const roomWriterToken = async (roomId: string, roomKey: string) => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`excalidraw-room-writer:${roomId}:${roomKey}`),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+};
+
 const fetchRoom = async (
   roomId: string,
 ): Promise<{ scene: StoredRoomScene; revision: number } | null> => {
@@ -110,6 +126,9 @@ const fetchRoom = async (
   });
   if (response.status === 404) {
     return null;
+  }
+  if (response.status === 401) {
+    throw new SignedOutError();
   }
   if (!response.ok) {
     throw new Error(
@@ -142,6 +161,7 @@ export const saveToHttp = async (
 
   // read, merge, then write only if nobody saved in between: the server
   // answers 409 when the revision moved, and we merge again
+  const writerToken = await roomWriterToken(roomId, roomKey);
   for (let attempt = 0; attempt < MAX_SAVE_ATTEMPTS; attempt++) {
     const stored = await fetchRoom(roomId);
     const nextElements = stored
@@ -160,7 +180,10 @@ export const saveToHttp = async (
     const response = await fetch(storageUrl(`/rooms/${roomId}`), {
       method: "PUT",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Room-Writer-Token": writerToken,
+      },
       body: JSON.stringify({
         scene,
         expectedRevision: stored?.revision ?? null,
@@ -168,6 +191,9 @@ export const saveToHttp = async (
     });
     if (response.status === 409) {
       continue;
+    }
+    if (response.status === 401) {
+      throw new SignedOutError();
     }
     if (!response.ok) {
       throw new Error(
@@ -214,6 +240,7 @@ export const saveFilesToHttp = async ({
 }) => {
   const erroredFiles: FileId[] = [];
   const savedFiles: FileId[] = [];
+  let signedOut = false;
 
   await Promise.all(
     files.map(async ({ id, buffer }) => {
@@ -224,6 +251,9 @@ export const saveFilesToHttp = async ({
           headers: { "Content-Type": "application/octet-stream" },
           body: buffer as Uint8Array<ArrayBuffer>,
         });
+        if (response.status === 401) {
+          signedOut = true;
+        }
         if (!response.ok) {
           throw new Error(`Upload failed (${response.status})`);
         }
@@ -233,6 +263,16 @@ export const saveFilesToHttp = async ({
       }
     }),
   );
+
+  // Share links ignore erroredFiles and collab never retries them, so a
+  // batch that failed as a whole must fail loudly, as Firebase's SDK-load
+  // failure does (see saveFilesToFirebase)
+  if (signedOut) {
+    throw new SignedOutError();
+  }
+  if (files.length && !savedFiles.length) {
+    throw new Error("Couldn't upload images to the server");
+  }
 
   return { savedFiles, erroredFiles };
 };
