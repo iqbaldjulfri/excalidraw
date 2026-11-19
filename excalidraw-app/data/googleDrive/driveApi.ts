@@ -45,16 +45,24 @@ export const toDrawingName = (fileName: string) =>
   fileName.replace(/\.excalidraw$/, "");
 
 export class DriveClient {
-  constructor(private readonly getAccessToken: () => string | null) {}
+  constructor(
+    private readonly getAccessToken: (opts: {
+      forceRefresh: boolean;
+    }) => Promise<string>,
+  ) {}
 
-  private async request(url: string, init: RequestInit = {}) {
-    const token = this.getAccessToken();
-    if (!token) {
-      throw new DriveApiError("Not signed in to Google Drive", 401);
-    }
+  private async send(url: string, init: RequestInit, forceRefresh: boolean) {
+    const token = await this.getAccessToken({ forceRefresh });
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(url, { ...init, headers });
+    return fetch(url, { ...init, headers });
+  }
+
+  private async request(url: string, init: RequestInit = {}) {
+    let response = await this.send(url, init, false);
+    if (response.status === 401) {
+      response = await this.send(url, init, true);
+    }
     if (!response.ok) {
       let message = `Google Drive request failed (${response.status})`;
       try {

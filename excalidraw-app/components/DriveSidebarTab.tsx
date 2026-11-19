@@ -10,6 +10,7 @@ import {
 import { useI18n } from "@excalidraw/excalidraw/i18n";
 
 import { useAtomValue } from "../app-jotai";
+import { currentUserAtom, signInUrl, signOut } from "../data/session";
 import { toDrawingName } from "../data/googleDrive/driveApi";
 import { driveStateAtom, driveSync } from "../data/googleDrive/DriveSync";
 
@@ -176,6 +177,72 @@ const DrawingRow = ({
   );
 };
 
+const NotConnected = ({ state }: { state: DriveState }) => {
+  const { t } = useI18n();
+
+  if (state.connection === "connecting") {
+    return <p className="drive-tab__text">{t("googleDrive.connecting")}</p>;
+  }
+
+  if (
+    state.connection === "signedOut" ||
+    state.connection === "driveNotGranted"
+  ) {
+    return (
+      <>
+        <p className="drive-tab__text">
+          {state.connection === "signedOut"
+            ? t("googleDrive.signedOut")
+            : t("googleDrive.driveNotGranted")}
+        </p>
+        <FilledButton
+          fullWidth
+          onClick={() => window.location.assign(signInUrl())}
+        >
+          {t("googleDrive.actions.signInAgain")}
+        </FilledButton>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="drive-tab__error" role="alert">
+        {state.error || t("googleDrive.errors.connectFailed")}
+      </p>
+      <FilledButton fullWidth onClick={() => driveSync.connect()}>
+        {t("googleDrive.actions.retry")}
+      </FilledButton>
+    </>
+  );
+};
+
+const AccountFooter = () => {
+  const { t } = useI18n();
+  const user = useAtomValue(currentUserAtom);
+
+  return (
+    <div className="drive-tab__account">
+      {user && (
+        <span className="drive-tab__account-email" title={user.email}>
+          {t("googleDrive.signedInAs", { email: user.email })}
+        </span>
+      )}
+      <button
+        type="button"
+        className="drive-tab__link"
+        onClick={async () => {
+          // finish the pending upload so sign-out never drops recent edits
+          await driveSync.syncNow();
+          await signOut();
+        }}
+      >
+        {t("googleDrive.actions.signOut")}
+      </button>
+    </div>
+  );
+};
+
 export const DriveSidebarTab = () => {
   const { t } = useI18n();
   const state = useAtomValue(driveStateAtom);
@@ -191,29 +258,11 @@ export const DriveSidebarTab = () => {
   );
 
   if (state.connection !== "connected") {
-    const isReconnect = state.connection === "reconnectRequired";
     return (
       <div className="drive-tab">
         <h3 className="drive-tab__title">{t("googleDrive.title")}</h3>
-        <p className="drive-tab__text">
-          {isReconnect
-            ? state.current
-              ? t("googleDrive.reconnect.withDrawing", {
-                  name: state.current.name,
-                })
-              : t("googleDrive.reconnect.description")
-            : t("googleDrive.intro")}
-        </p>
-        {errorLine}
-        <FilledButton
-          fullWidth
-          status={state.connection === "connecting" ? "loading" : null}
-          onClick={() => driveSync.connect()}
-        >
-          {isReconnect
-            ? t("googleDrive.actions.reconnect")
-            : t("googleDrive.actions.connect")}
-        </FilledButton>
+        <NotConnected state={state} />
+        <AccountFooter />
       </div>
     );
   }
@@ -276,13 +325,7 @@ export const DriveSidebarTab = () => {
         <p className="drive-tab__text">{t("googleDrive.list.empty")}</p>
       )}
 
-      <button
-        type="button"
-        className="drive-tab__link drive-tab__sign-out"
-        onClick={() => driveSync.signOut()}
-      >
-        {t("googleDrive.actions.signOut")}
-      </button>
+      <AccountFooter />
     </div>
   );
 };

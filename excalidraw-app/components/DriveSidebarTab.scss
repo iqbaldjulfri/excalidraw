@@ -67,9 +67,23 @@
     }
   }
 
-  .drive-tab__sign-out {
-    align-self: flex-start;
+  .drive-tab__account {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
     margin-top: auto;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--sidebar-border-color);
+  }
+
+  .drive-tab__account-email {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    color: var(--color-gray-50);
   }
 
   .drive-tab__list {

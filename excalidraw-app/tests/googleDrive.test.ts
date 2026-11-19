@@ -11,7 +11,9 @@ import type {
 } from "@excalidraw/excalidraw/types";
 
 import { appJotaiStore } from "../app-jotai";
-import { DriveApiError } from "../data/googleDrive/driveApi";
+import { SignedOutError } from "../data/session";
+import { DriveNotGrantedError } from "../data/googleDrive/auth";
+import { DriveClient } from "../data/googleDrive/driveApi";
 import { DriveSync, driveStateAtom } from "../data/googleDrive/DriveSync";
 import {
   mergeDriveScene,
@@ -19,14 +21,11 @@ import {
   serializeDriveScene,
 } from "../data/googleDrive/mergeScene";
 
-import type { DriveClient, DriveDrawing } from "../data/googleDrive/driveApi";
+import type { DriveDrawing } from "../data/googleDrive/driveApi";
 
-vi.mock("../data/googleDrive/auth", () => ({
+vi.mock("../data/googleDrive/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../data/googleDrive/auth")>()),
   isGoogleDriveEnabled: () => true,
-  getValidAccessToken: () => "token",
-  clearAccessToken: () => {},
-  requestAccessToken: async () => "token",
-  revokeAccessToken: async () => {},
 }));
 
 type ElementSpec = { id: string; version: number; isDeleted: boolean };
@@ -267,23 +266,49 @@ describe("DriveSync", () => {
     expect(api.setToast).toHaveBeenCalled();
   });
 
-  it("asks to reconnect when the Google token is rejected", async () => {
+  it("keeps the linked drawing when the app session ends", async () => {
     const { sync, client } = await setUpSync({
       local: scene(rect("a", 1)),
       remote: scene(rect("a", 1)),
       linkedVersion: "7",
       remoteVersion: "7",
     });
-    client.getDrawingMetadata.mockRejectedValueOnce(
-      new DriveApiError("Invalid Credentials", 401),
-    );
+    client.getDrawingMetadata.mockRejectedValueOnce(new SignedOutError());
 
     await sync.syncNow();
 
-    expect(appJotaiStore.get(driveStateAtom).connection).toBe(
-      "reconnectRequired",
-    );
+    expect(appJotaiStore.get(driveStateAtom).connection).toBe("signedOut");
     expect(appJotaiStore.get(driveStateAtom).current?.fileId).toBe("file-1");
+  });
+
+  it("connects on startup without any user action", async () => {
+    const { client } = await setUpSync({
+      local: scene(rect("a", 1)),
+      remote: scene(rect("a", 1)),
+      linkedVersion: "7",
+      remoteVersion: "7",
+    });
+
+    expect(client.ensureFolder).toHaveBeenCalledTimes(1);
+    expect(appJotaiStore.get(driveStateAtom).connection).toBe("connected");
+  });
+
+  it("explains when Drive access wasn't granted at sign-in", async () => {
+    const client = createFakeClient({
+      content: serializeDriveScene([], {}, {}),
+      version: "1",
+    });
+    client.ensureFolder.mockRejectedValueOnce(new DriveNotGrantedError());
+    const sync = new DriveSync({ client: client as unknown as DriveClient });
+
+    await sync.init(
+      createFakeApi([]).api as unknown as ExcalidrawImperativeAPI,
+      { isExternalScene: false },
+    );
+
+    expect(appJotaiStore.get(driveStateAtom).connection).toBe(
+      "driveNotGranted",
+    );
   });
 
   it("doesn't replace an unsaved canvas when the user cancels", async () => {
@@ -320,5 +345,32 @@ describe("DriveSync", () => {
     );
 
     expect(appJotaiStore.get(driveStateAtom).current).toBeNull();
+  });
+});
+
+describe("DriveClient", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retries once with a freshly refreshed token when Drive rejects one", async () => {
+    const tokens = ["stale", "fresh"];
+    const getAccessToken = vi.fn(async () => tokens.shift()!);
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) =>
+      new Headers(init.headers).get("Authorization") === "Bearer fresh"
+        ? Response.json(drawingMeta("3"))
+        : new Response("{}", { status: 401 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const meta = await new DriveClient(getAccessToken).getDrawingMetadata(
+      "file-1",
+    );
+
+    expect(meta.version).toBe("3");
+    expect(getAccessToken.mock.calls).toEqual([
+      [{ forceRefresh: false }],
+      [{ forceRefresh: true }],
+    ]);
   });
 });

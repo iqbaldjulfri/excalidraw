@@ -17,8 +17,11 @@ interface ImportMetaEnv {
 
   VITE_APP_FIREBASE_CONFIG: string;
 
-  // OAuth web client ID from Google Cloud; leave empty to hide Drive sync
-  VITE_APP_GOOGLE_CLIENT_ID: string;
+  // "true" when served behind the self-hosted auth server (server/), which
+  // gates sign-in and issues Google Drive tokens
+  VITE_APP_AUTH_ENABLED: string;
+  // where the dev server proxies /auth to; production uses the reverse proxy
+  VITE_APP_AUTH_DEV_PROXY: string;
 
   // whether to disable live reload / HMR. Usuaully what you want to do when
   // debugging Service Workers.

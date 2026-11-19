@@ -8,19 +8,14 @@ import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
 
 import { appJotaiStore, atom } from "../../app-jotai";
 
+import { SignedOutError } from "../session";
+
 import {
-  clearAccessToken,
-  getValidAccessToken,
+  DriveNotGrantedError,
+  getDriveAccessToken,
   isGoogleDriveEnabled,
-  requestAccessToken,
-  revokeAccessToken,
 } from "./auth";
-import {
-  DriveClient,
-  isDriveAuthError,
-  isDriveNotFoundError,
-  toDrawingName,
-} from "./driveApi";
+import { DriveClient, isDriveNotFoundError, toDrawingName } from "./driveApi";
 import {
   hashSyncableElements,
   mergeDriveScene,
@@ -34,7 +29,6 @@ import type { DriveDrawing } from "./driveApi";
 // localStorage, not sessionStorage: tabs share one canvas in localStorage, so
 // they must also share which Drive drawing that canvas belongs to.
 const LINK_STORAGE_KEY = "excalidraw-gdrive-link";
-const CONSENT_STORAGE_KEY = "excalidraw-gdrive-consented";
 
 const SYNC_DEBOUNCE_MS = 2000;
 
@@ -47,10 +41,13 @@ export type DriveLink = {
 
 export type DriveConnection =
   | "disabled"
-  | "signedOut"
   | "connecting"
-  | "reconnectRequired"
-  | "connected";
+  | "connected"
+  /** The app's login session ended; a new sign-in is needed. */
+  | "signedOut"
+  /** The user unticked Drive on Google's consent screen. */
+  | "driveNotGranted"
+  | "error";
 
 export type DriveSyncStatus = "idle" | "syncing" | "synced" | "error";
 
@@ -87,26 +84,6 @@ const writeLink = (link: DriveLink | null) => {
   }
 };
 
-const hasConsented = () => {
-  try {
-    return localStorage.getItem(CONSENT_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-};
-
-const setConsented = (consented: boolean) => {
-  try {
-    if (consented) {
-      localStorage.setItem(CONSENT_STORAGE_KEY, "true");
-    } else {
-      localStorage.removeItem(CONSENT_STORAGE_KEY);
-    }
-  } catch {
-    // storage blocked: the consent screen shows again next time
-  }
-};
-
 export const driveStateAtom = atom<DriveState>({
   connection: "disabled",
   drawings: [],
@@ -136,7 +113,7 @@ export class DriveSync {
       confirmReplaceCanvas?: () => Promise<boolean>;
     } = {},
   ) {
-    this.client = opts.client ?? new DriveClient(getValidAccessToken);
+    this.client = opts.client ?? new DriveClient(getDriveAccessToken);
   }
 
   getState() {
@@ -170,63 +147,24 @@ export class DriveSync {
     if (opts.isExternalScene) {
       writeLink(null);
     }
-    const current = readLink();
-    this.setState({ current });
-    if (getValidAccessToken()) {
-      await this.afterSignIn({ syncNow: false });
-    } else if (hasConsented() || current) {
-      this.setState({ connection: "reconnectRequired" });
-    } else {
-      this.setState({ connection: "signedOut" });
-    }
+    this.setState({ current: readLink() });
+    await this.connect({ syncNow: false });
   }
 
-  /** Opens Google's popup: call only from a click handler. */
-  async connect() {
-    this.setState({ connection: "connecting", error: null });
-    try {
-      await requestAccessToken({ hasConsentedBefore: hasConsented() });
-      setConsented(true);
-    } catch (error) {
-      this.setState({
-        connection:
-          readLink() || hasConsented() ? "reconnectRequired" : "signedOut",
-        error: getErrorMessage(error),
-      });
-      return;
-    }
-    await this.afterSignIn({ syncNow: true });
-  }
-
-  private async afterSignIn(opts: { syncNow: boolean }) {
+  /** Signing in to the app grants Drive, so this needs no user gesture. */
+  async connect(opts: { syncNow: boolean } = { syncNow: true }) {
     this.setState({ connection: "connecting", error: null });
     try {
       this.folderId = await this.client.ensureFolder();
       const drawings = await this.client.listDrawings(this.folderId);
       this.setState({ connection: "connected", drawings });
     } catch (error) {
-      this.handleError(error);
+      this.handleError(error, { whileConnecting: true });
       return;
     }
     if (opts.syncNow && this.getState().current) {
       await this.syncNow();
     }
-  }
-
-  async signOut() {
-    this.scheduleSync.cancel();
-    await revokeAccessToken();
-    setConsented(false);
-    this.folderId = null;
-    this.resetSyncTracking();
-    this.setCurrent(null);
-    this.setState({
-      connection: "signedOut",
-      drawings: [],
-      syncStatus: "idle",
-      lastSyncedAt: null,
-      error: null,
-    });
   }
 
   async refreshDrawings() {
@@ -242,17 +180,28 @@ export class DriveSync {
     }
   }
 
-  private handleError(error: unknown) {
-    if (isDriveAuthError(error)) {
-      clearAccessToken();
+  private handleError(
+    error: unknown,
+    opts: { whileConnecting?: boolean } = {},
+  ) {
+    if (error instanceof SignedOutError) {
+      this.scheduleSync.cancel();
       this.setState({
-        connection: "reconnectRequired",
-        syncStatus: "error",
-        error: t("googleDrive.errors.sessionExpired"),
+        connection: "signedOut",
+        syncStatus: "idle",
+        error: null,
       });
       return;
     }
-    this.setState({ syncStatus: "error", error: getErrorMessage(error) });
+    if (error instanceof DriveNotGrantedError) {
+      this.setState({ connection: "driveNotGranted", error: null });
+      return;
+    }
+    this.setState({
+      ...(opts.whileConnecting ? { connection: "error" as const } : null),
+      syncStatus: "error",
+      error: getErrorMessage(error),
+    });
   }
 
   // ---------------------------------------------------------------------------

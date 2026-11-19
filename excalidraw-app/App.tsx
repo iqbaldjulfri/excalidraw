@@ -132,6 +132,7 @@ import {
 } from "./data/LocalData";
 import { isBrowserStorageStateNewer } from "./data/tabSync";
 import { driveSync } from "./data/googleDrive/DriveSync";
+import { useCurrentUser } from "./data/session";
 import { ShareDialog, shareDialogStateAtom } from "./share/ShareDialog";
 import CollabError, { collabErrorIndicatorAtom } from "./collab/CollabError";
 import { useHandleAppTheme } from "./useHandleAppTheme";
@@ -413,6 +414,13 @@ const ExcalidrawWrapper = () => {
     return isCollaborationLink(window.location.href);
   });
   const collabError = useAtomValue(collabErrorIndicatorAtom);
+  const currentUser = useCurrentUser();
+
+  useEffect(() => {
+    if (collabAPI && currentUser && !importUsernameFromLocalStorage()) {
+      collabAPI.setUsername(currentUser.name);
+    }
+  }, [collabAPI, currentUser]);
   const userToFollow = useAtomValue(userToFollowAtom);
 
   const viewportStatusFrame = useMemo(

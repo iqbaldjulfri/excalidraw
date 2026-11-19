@@ -800,8 +800,11 @@
   "googleDrive": {
     "title": "Google Drive",
     "tab": "Google Drive",
-    "intro": "Keep your drawings in Google Drive. Each drawing autosaves to its own file, and edits made on other devices merge in when you come back.",
     "notLinked": "This canvas isn't saved to Drive yet.",
+    "connecting": "Connecting to Google Drive…",
+    "signedOut": "Your session has ended. Your changes are kept in this browser and sync once you sign in again.",
+    "driveNotGranted": "Google Drive access wasn't allowed when you signed in. Sign in again and tick Google Drive on Google's consent screen.",
+    "signedInAs": "Signed in as {{email}}",
     "status": {
       "syncing": "Saving…",
       "synced": "Saved {{time}}",
@@ -809,18 +812,14 @@
       "error": "Couldn't save"
     },
     "actions": {
-      "connect": "Connect Google Drive",
-      "reconnect": "Reconnect Google Drive",
       "newDrawing": "New drawing",
       "saveCanvas": "Save canvas to Drive",
       "stopSyncing": "Stop syncing",
       "rename": "Rename",
       "trash": "Move to Drive trash",
-      "signOut": "Disconnect Google Drive"
-    },
-    "reconnect": {
-      "description": "Your Google session has ended. Reconnect to keep syncing.",
-      "withDrawing": "Your Google session has ended. Changes to \"{{name}}\" are kept in this browser and sync when you reconnect."
+      "signOut": "Sign out",
+      "signInAgain": "Sign in again",
+      "retry": "Try again"
     },
     "list": {
       "current": "Open now",
@@ -835,8 +834,8 @@
       "canvasReplaced": "The canvas was replaced, so it no longer syncs to \"{{name}}\". That drawing is unchanged in Drive."
     },
     "errors": {
-      "sessionExpired": "Your Google session has ended. Reconnect to keep syncing.",
-      "fileMissing": "\"{{name}}\" is no longer in Drive, so this canvas stopped syncing to it."
+      "fileMissing": "\"{{name}}\" is no longer in Drive, so this canvas stopped syncing to it.",
+      "connectFailed": "Couldn't connect to Google Drive."
     }
   }
 }

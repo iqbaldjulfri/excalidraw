@@ -1,0 +1,14 @@
+{
+  "name": "excalidraw-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.mjs",
+    "start": "node dist/index.mjs",
+    "dev": "yarn build && node --env-file=.env dist/index.mjs"
+  }
+}
