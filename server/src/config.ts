@@ -23,6 +23,8 @@ export type Config = {
   reverifyIntervalMs: number;
   /** How long to keep a session alive when Google can't be reached. */
   reverifyGraceMs: number;
+  /** Share links and collab rooms unopened this long are deleted. */
+  retentionMs: number;
 };
 
 const required = (env: NodeJS.ProcessEnv, name: string) => {
@@ -50,6 +52,10 @@ const loadPickerConfig = (env: NodeJS.ProcessEnv) => {
 export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
   const publicUrl = new URL(required(env, "PUBLIC_URL"));
   const sessionSecret = required(env, "SESSION_SECRET");
+  const retentionDays = Number(env.RETENTION_DAYS || 180);
+  if (!(retentionDays > 0)) {
+    throw new Error("RETENTION_DAYS must be a positive number of days");
+  }
   if (sessionSecret.length < 32) {
     throw new Error("SESSION_SECRET must be at least 32 characters");
   }
@@ -69,5 +75,6 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     sessionIdleMs: 7 * DAY,
     reverifyIntervalMs: HOUR,
     reverifyGraceMs: DAY,
+    retentionMs: retentionDays * DAY,
   };
 };

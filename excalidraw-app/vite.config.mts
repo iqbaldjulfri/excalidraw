@@ -161,6 +161,10 @@ export default defineConfig(({ mode }) => {
                 target: envVars.VITE_APP_AUTH_DEV_PROXY || "http://localhost:3015",
                 changeOrigin: false,
               },
+              "/api/": {
+                target: envVars.VITE_APP_AUTH_DEV_PROXY || "http://localhost:3015",
+                changeOrigin: false,
+              },
             }
           : undefined,
     },

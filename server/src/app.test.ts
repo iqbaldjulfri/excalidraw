@@ -7,6 +7,7 @@ import path from "node:path";
 import { createAuthApp, sanitizeReturnTo, SESSION_COOKIE } from "./app";
 import { DRIVE_FILE_SCOPE, GOOGLE_ENDPOINTS, GoogleOAuth } from "./google";
 import { FileSessionStore } from "./sessions";
+import { DiskStorage } from "./storage";
 
 import type { Config } from "./config";
 import type { AddressInfo } from "node:net";
@@ -123,6 +124,7 @@ const setUp = async () => {
     sessionIdleMs: 7 * 24 * HOUR,
     reverifyIntervalMs: HOUR,
     reverifyGraceMs: 24 * HOUR,
+    retentionMs: 180 * 24 * HOUR,
   };
   const now = () => time;
   const sessions = new FileSessionStore(dataDir, config.encryptionKey);
@@ -134,7 +136,10 @@ const setUp = async () => {
     fetch: fakeFetch,
     now,
   });
-  const server = createServer(createAuthApp({ config, google, sessions, now }));
+  const storage = new DiskStorage(dataDir, now);
+  const server = createServer(
+    createAuthApp({ config, google, sessions, storage, now }),
+  );
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -193,6 +198,7 @@ const setUp = async () => {
   return {
     fake,
     dataDir,
+    storage,
     request,
     signIn,
     withSession,
@@ -531,5 +537,167 @@ describe("sign-out and storage", () => {
     expect(file).not.toContain(session!);
     expect(contents).not.toContain("refresh-1");
     expect(contents).not.toContain(DOMAIN);
+  });
+});
+
+describe("storage API", () => {
+  const signedIn = async () => {
+    const { session } = await ctx.signIn();
+    return (init: RequestInit = {}) => ({
+      ...init,
+      headers: {
+        cookie: `${SESSION_COOKIE}=${encodeURIComponent(session!)}`,
+        origin: "https://draw.acme.test",
+        ...(init.headers as Record<string, string>),
+      },
+    });
+  };
+
+  it("refuses signed-out requests", async () => {
+    expect((await ctx.request("/api/v2/abc")).status).toBe(401);
+    expect(
+      (await ctx.request("/api/v2/post/", { method: "POST", body: "x" }))
+        .status,
+    ).toBe(401);
+  });
+
+  it("stores a share link and returns the same bytes", async () => {
+    const auth = await signedIn();
+    const bytes = new Uint8Array([1, 2, 3, 250]);
+
+    const created = await ctx.request(
+      "/api/v2/post/",
+      auth({ method: "POST", body: bytes }),
+    );
+    const { id } = await created.json();
+    const loaded = await ctx.request(`/api/v2/${id}`, auth());
+
+    expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(new Uint8Array(await loaded.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("answers an oversized share link with the error the app knows", async () => {
+    const auth = await signedIn();
+
+    const response = await ctx.request(
+      "/api/v2/post/",
+      auth({ method: "POST", body: new Uint8Array(11 * 1024 * 1024) }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error_class: "RequestTooLargeError",
+    });
+  });
+
+  it("rejects a room save that didn't start from the latest revision", async () => {
+    const auth = await signedIn();
+    const scene = { sceneVersion: 1, iv: "aXY=", ciphertext: "Y3Q=" };
+    const put = (expectedRevision: number | null) =>
+      ctx.request(
+        "/api/rooms/room1",
+        auth({
+          method: "PUT",
+          body: JSON.stringify({ scene, expectedRevision }),
+        }),
+      );
+
+    expect(await (await put(null)).json()).toEqual({ revision: 1 });
+    expect((await put(null)).status).toBe(409);
+    expect(await (await put(1)).json()).toEqual({ revision: 2 });
+    expect((await put(1)).status).toBe(409);
+    expect(
+      await (await ctx.request("/api/rooms/room1", auth())).json(),
+    ).toEqual({ scene, revision: 2 });
+  });
+
+  it("serializes concurrent saves of the same revision", async () => {
+    const auth = await signedIn();
+    const scene = { sceneVersion: 1, iv: "aXY=", ciphertext: "Y3Q=" };
+
+    const statuses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        ctx
+          .request(
+            "/api/rooms/room2",
+            auth({
+              method: "PUT",
+              body: JSON.stringify({ scene, expectedRevision: null }),
+            }),
+          )
+          .then((response) => response.status),
+      ),
+    );
+
+    expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+    expect(statuses.filter((status) => status === 409)).toHaveLength(4);
+  });
+
+  it("keeps the first upload of an image", async () => {
+    const auth = await signedIn();
+    const url = "/api/files/rooms/room1/file1";
+
+    await ctx.request(url, auth({ method: "PUT", body: new Uint8Array([1]) }));
+    await ctx.request(url, auth({ method: "PUT", body: new Uint8Array([9]) }));
+    const loaded = await ctx.request(url, auth());
+
+    expect(new Uint8Array(await loaded.arrayBuffer())).toEqual(
+      new Uint8Array([1]),
+    );
+    expect(loaded.headers.get("cache-control")).toContain("private");
+  });
+
+  it("doesn't let ids reach outside the storage folder", async () => {
+    const auth = await signedIn();
+
+    for (const path of [
+      "/api/files/rooms/..%2F..%2Fsessions/x",
+      "/api/files/rooms/room1/..%2Fscene",
+      "/api/rooms/..",
+      "/api/files/other/room1/file1",
+    ]) {
+      expect((await ctx.request(path, auth())).status).toBe(404);
+    }
+  });
+
+  it("refuses writes from other sites", async () => {
+    const auth = await signedIn();
+
+    const response = await ctx.request(
+      "/api/v2/post/",
+      auth({
+        method: "POST",
+        body: "x",
+        headers: { origin: "https://evil.test" },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("deletes share links and rooms not opened for the retention period, with their images", async () => {
+    const auth = await signedIn();
+    const unused = await (
+      await ctx.request("/api/v2/post/", auth({ method: "POST", body: "a" }))
+    ).json();
+    const used = await (
+      await ctx.request("/api/v2/post/", auth({ method: "POST", body: "b" }))
+    ).json();
+    await ctx.request(
+      `/api/files/shareLinks/${unused.id}/img`,
+      auth({ method: "PUT", body: "i" }),
+    );
+
+    ctx.advance(100 * 24 * HOUR);
+    await ctx.storage.readShareLink(used.id);
+    ctx.advance(81 * 24 * HOUR);
+    const removed = await ctx.storage.deleteUnused(180 * 24 * HOUR);
+
+    expect(removed).toBe(1);
+    expect(await ctx.storage.readShareLink(unused.id)).toBeNull();
+    expect(
+      await ctx.storage.readFile("shareLinks", unused.id, "img"),
+    ).toBeNull();
+    expect(await ctx.storage.readShareLink(used.id)).not.toBeNull();
   });
 });

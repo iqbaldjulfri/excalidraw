@@ -39,12 +39,27 @@ Do this in a Google Cloud project owned by your Workspace organization.
 | `GOOGLE_PICKER_API_KEY` | no | From step 6. Without it the picker buttons are hidden |
 | `GOOGLE_PROJECT_NUMBER` | no | From step 6. Set both picker variables or neither |
 | `SESSION_SECRET` | yes | Random string of 32+ characters: `openssl rand -base64 48` |
-| `DATA_DIR` | no | Where encrypted session files go. Default `./data` |
+| `DATA_DIR` | no | Where sessions and stored drawings go. Default `./data` |
+| `RETENTION_DAYS` | no | Share links and collab rooms not opened for this many days are deleted, with their images. Default `180` |
 | `PORT` | no | Default `3015` |
 
 Changing `SESSION_SECRET` signs everyone out.
 
 Build the app with `VITE_APP_AUTH_ENABLED=true` so it shows the signed-in user and fetches Drive tokens from this server.
+
+## Storage
+
+This server also replaces Firebase and the public share-link backend, so drawings never leave your server. The browser encrypts everything before upload; the server never sees a key. Under `DATA_DIR/storage/` it keeps:
+
+| Endpoint | Holds |
+| --- | --- |
+| `POST /api/v2/post/`, `GET /api/v2/<id>` | Share-link scenes. Every click on "Export to Link" creates a new one |
+| `GET`/`PUT /api/rooms/<roomId>` | The latest snapshot of a collab room. A save must name the revision it started from, so two collaborators saving at once can't overwrite each other |
+| `GET`/`PUT /api/files/<rooms or shareLinks>/<id>/<fileId>` | Images, stored with the room or link they belong to. The first upload of an image id is kept |
+
+Every request needs a signed-in session, checked by this server itself. Once an hour it deletes share links and rooms that nobody has opened for `RETENTION_DAYS`, along with their images. Nothing is backed up.
+
+Build the app with `VITE_APP_STORAGE_URL=/api`, `VITE_APP_BACKEND_V2_GET_URL=/api/v2/` and `VITE_APP_BACKEND_V2_POST_URL=/api/v2/post/` to use it.
 
 ## Local development
 

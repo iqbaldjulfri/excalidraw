@@ -7,10 +7,12 @@ import {
 } from "./crypto";
 import { DRIVE_FILE_SCOPE, GrantRevokedError } from "./google";
 import { isSessionExpired } from "./sessions";
+import { handleStorageRequest } from "./storageRoutes";
 
 import type { Config } from "./config";
 import type { GoogleOAuth } from "./google";
 import type { FileSessionStore, SessionData } from "./sessions";
+import type { DiskStorage } from "./storage";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 export const SESSION_COOKIE = "exc_session";
@@ -39,6 +41,7 @@ export type AuthAppDeps = {
   config: Config;
   google: GoogleOAuth;
   sessions: FileSessionStore;
+  storage?: DiskStorage;
   now?: () => number;
 };
 
@@ -508,10 +511,39 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     });
   };
 
+  /**
+   * Checked here as well as at the proxy: this server holds the data, so it
+   * must not depend on the proxy being configured right.
+   */
+  const handleApi = async (
+    req: IncomingMessage,
+    url: URL,
+    res: ServerResponse,
+    storage: DiskStorage,
+  ) => {
+    if (!(await authenticate(req))) {
+      sendJSON(res, 401, { error: "signed_out" });
+      return;
+    }
+    const isWrite = req.method !== "GET" && req.method !== "HEAD";
+    if (
+      isWrite &&
+      req.headers.origin &&
+      req.headers.origin !== config.publicUrl.origin
+    ) {
+      sendJSON(res, 403, { error: "bad_origin" });
+      return;
+    }
+    await handleStorageRequest(req, res, url, storage);
+  };
+
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", config.publicUrl);
     const route = `${req.method} ${url.pathname}`;
     try {
+      if (url.pathname.startsWith("/api/") && deps.storage) {
+        return await handleApi(req, url, res, deps.storage);
+      }
       switch (route) {
         case "GET /auth/login":
           return handleLogin(url, res);

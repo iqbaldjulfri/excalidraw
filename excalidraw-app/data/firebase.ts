@@ -23,6 +23,8 @@ import type {
 
 import { FILE_CACHE_MAX_AGE_SEC } from "../app_constants";
 
+import * as httpStorage from "./httpStorage";
+
 import { getSyncableElements } from ".";
 
 import type { SyncableExcalidrawElement } from ".";
@@ -79,6 +81,10 @@ export const uploadBytesToFirebase = async (
   data: Blob | Uint8Array,
   metadata?: UploadMetadata,
 ) => {
+  if (httpStorage.isHttpStorageEnabled()) {
+    // only Excalidraw+ export calls this, which self-hosting hides
+    throw new Error("Not available with self-hosted storage");
+  }
   const { storage, ref, uploadBytes } = await _loadStorage();
   return uploadBytes(ref(storage, path), data, metadata);
 };
@@ -131,6 +137,9 @@ export const isSavedToFirebase = (
   portal: Portal,
   elements: readonly ExcalidrawElement[],
 ): boolean => {
+  if (httpStorage.isHttpStorageEnabled()) {
+    return httpStorage.isSavedToHttp(portal, elements);
+  }
   if (portal.socket && portal.roomId && portal.roomKey) {
     const sceneVersion = getSceneVersion(elements);
 
@@ -148,6 +157,9 @@ export const saveFilesToFirebase = async ({
   prefix: string;
   files: { id: FileId; buffer: Uint8Array }[];
 }) => {
+  if (httpStorage.isHttpStorageEnabled()) {
+    return httpStorage.saveFilesToHttp({ prefix, files });
+  }
   // failing to load the SDK must fail the whole save rather than be reported
   // per file as `erroredFiles` (which share links ignore, and collab never
   // retries)
@@ -192,6 +204,9 @@ export const saveToFirebase = async (
   elements: readonly SyncableExcalidrawElement[],
   appState: AppState,
 ) => {
+  if (httpStorage.isHttpStorageEnabled()) {
+    return httpStorage.saveToHttp(portal, elements, appState);
+  }
   const { roomId, roomKey, socket } = portal;
   if (
     // bail if no room exists as there's nothing we can do at this point
@@ -254,6 +269,9 @@ export const loadFromFirebase = async (
   roomKey: string,
   socket: Socket | null,
 ): Promise<readonly SyncableExcalidrawElement[] | null> => {
+  if (httpStorage.isHttpStorageEnabled()) {
+    return httpStorage.loadFromHttp(roomId, roomKey, socket);
+  }
   const { firestore, doc, getDoc } = await _loadFirestore();
   const docRef = doc(firestore, "scenes", roomId);
   const docSnap = await getDoc(docRef);
@@ -279,6 +297,9 @@ export const loadFilesFromFirebase = async (
   decryptionKey: string,
   filesIds: readonly FileId[],
 ) => {
+  if (httpStorage.isHttpStorageEnabled()) {
+    return httpStorage.loadFilesFromHttp(prefix, decryptionKey, filesIds);
+  }
   const loadedFiles: BinaryFileData[] = [];
   const erroredFiles = new Map<FileId, true>();
 

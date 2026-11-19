@@ -16,6 +16,9 @@ interface ImportMetaEnv {
   VITE_APP_AI_BACKEND: string;
 
   VITE_APP_FIREBASE_CONFIG: string;
+  // base URL of the self-hosted server's storage API (e.g. "/api"); when set
+  // it replaces Firebase for collab rooms and images
+  VITE_APP_STORAGE_URL: string;
 
   // "true" when served behind the self-hosted auth server (server/), which
   // gates sign-in and issues Google Drive tokens
