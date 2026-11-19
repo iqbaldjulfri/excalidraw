@@ -4,11 +4,14 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 
 import { decrypt, encrypt, randomToken, sha256Hex } from "./crypto";
+
+const TEMP_FILE_MAX_AGE_MS = 60 * 60 * 1000;
 
 export type SessionUser = {
   /** Google's stable account id. */
@@ -135,7 +138,14 @@ export class FileSessionStore {
     for (const name of names) {
       const file = path.join(this.dir, name);
       if (name.endsWith(".tmp")) {
-        await rm(file, { force: true });
+        // a young one may belong to a write about to rename it into place
+        const modified = await stat(file).then(
+          (stats) => stats.mtimeMs,
+          () => null,
+        );
+        if (modified !== null && Date.now() - modified > TEMP_FILE_MAX_AGE_MS) {
+          await rm(file, { force: true });
+        }
         continue;
       }
       const json = decrypt(

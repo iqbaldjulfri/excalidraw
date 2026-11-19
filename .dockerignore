@@ -10,6 +10,10 @@
 !packages/
 !scripts/
 !server/
+# the auth server's local sessions and secrets must not enter the app build
+server/data
+server/.env
+server/dist
 !tsconfig.json
 !yarn.lock
 

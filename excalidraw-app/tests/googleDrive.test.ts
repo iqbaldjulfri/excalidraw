@@ -136,6 +136,7 @@ const setUpSync = async (opts: {
     pickDrawingFile: () => Promise<{ id: string; name: string } | null>;
     pickFolder: () => Promise<{ id: string; name: string } | null>;
   };
+  failConnect?: boolean;
 }) => {
   localStorage.setItem(
     LINK_KEY,
@@ -150,6 +151,9 @@ const setUpSync = async (opts: {
     version: opts.remoteVersion,
   };
   const client = createFakeClient(remote);
+  if (opts.failConnect) {
+    client.ensureFolder.mockRejectedValueOnce(new Error("offline"));
+  }
   const fakeApi = createFakeApi(opts.local);
   const sync = new DriveSync({
     client: client as unknown as DriveClient,
@@ -541,5 +545,104 @@ describe("DriveSync picker and save folder", () => {
     await sync.prepareForSignOut();
 
     expect(localStorage.getItem("excalidraw-gdrive-save-folder")).toBeNull();
+  });
+});
+
+describe("DriveSync cold-review fixes", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("drops a sync that started before another drawing was opened", async () => {
+    const { sync, client, api } = await setUpSync({
+      local: scene(rect("a", 1)),
+      remote: scene(rect("b", 1)),
+      linkedVersion: "7",
+      remoteVersion: "9",
+      confirmReplaceCanvas: async () => true,
+    });
+    let release!: () => void;
+    client.getDrawingMetadata.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(drawingMeta("9"));
+        }),
+    );
+
+    const staleSync = sync.syncNow();
+    await Promise.resolve();
+    sync.unlink();
+    await sync.openDrawing("file-2");
+    release();
+    await staleSync;
+
+    // without the guard, the old sync merges "a" into the drawing just opened
+    expect(ids(api.getSceneElementsIncludingDeleted())).toEqual(["b@1"]);
+    expect(appJotaiStore.get(driveStateAtom).current?.fileId).toBe("file-2");
+  });
+
+  it("clears the canvas on sign-out once it's saved to Drive", async () => {
+    const { sync, api } = await setUpSync({
+      local: scene(rect("a", 2)),
+      remote: scene(rect("a", 1)),
+      linkedVersion: "7",
+      remoteVersion: "7",
+    });
+
+    await sync.prepareForSignOut();
+
+    expect(api.resetScene).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an unlinked canvas on sign-out, as it may be the only copy", async () => {
+    const { sync, api } = await setUpSync({
+      local: scene(rect("a", 2)),
+      remote: scene(rect("a", 1)),
+      linkedVersion: "7",
+      remoteVersion: "7",
+    });
+    sync.unlink();
+
+    await sync.prepareForSignOut();
+
+    expect(api.resetScene).not.toHaveBeenCalled();
+  });
+
+  it("refuses to link a drawing the user can only view", async () => {
+    const { sync, client, api } = await setUpSync({
+      local: scene(rect("a", 1)),
+      remote: scene(rect("b", 1)),
+      linkedVersion: "7",
+      remoteVersion: "7",
+      confirmReplaceCanvas: async () => true,
+    });
+    sync.unlink();
+    client.getDrawingMetadata.mockResolvedValueOnce({
+      ...drawingMeta("7"),
+      capabilities: { canEdit: false },
+    });
+
+    await sync.openDrawing("file-1");
+
+    expect(appJotaiStore.get(driveStateAtom).current).toBeNull();
+    expect(appJotaiStore.get(driveStateAtom).error).toContain("only view");
+    expect(ids(api.getSceneElementsIncludingDeleted())).toEqual(["a@1"]);
+  });
+
+  it("notices a file opened from disk before the first sync after reload", async () => {
+    const { sync, client, setElements } = await setUpSync({
+      local: scene(rect("a", 1)),
+      remote: scene(rect("a", 1)),
+      linkedVersion: "7",
+      remoteVersion: "7",
+      failConnect: true,
+    });
+    sync.onSceneChange(scene(rect("a", 1)));
+
+    setElements(scene(rect("z", 1)));
+    await sync.connect();
+
+    expect(client.updateDrawingContent).not.toHaveBeenCalled();
+    expect(appJotaiStore.get(driveStateAtom).current).toBeNull();
   });
 });

@@ -142,6 +142,12 @@ export class DriveSync {
   private lastSyncedHash: number | null = null;
   /** Element ids of the last synced scene, to notice a replaced canvas. */
   private lastSyncedIds: Set<string> | null = null;
+  /**
+   * Bumped whenever the canvas changes drawing. Opening or creating one runs
+   * outside the sync queue, so a sync that started before must drop its
+   * results rather than merge the old drawing into the new one.
+   */
+  private linkGeneration = 0;
 
   private readonly pickers: Pickers;
 
@@ -172,6 +178,7 @@ export class DriveSync {
   private resetSyncTracking() {
     this.lastSyncedHash = null;
     this.lastSyncedIds = null;
+    this.linkGeneration++;
   }
 
   /**
@@ -217,6 +224,10 @@ export class DriveSync {
    */
   async prepareForSignOut() {
     await this.syncNow();
+    const { current, syncStatus } = this.getState();
+    // cleared only when it's safely in Drive: an unlinked canvas may be
+    // someone's only copy of their work
+    const isSavedToDrive = !!current && syncStatus === "synced";
     this.unlink();
     writeSaveFolder(null);
     this.setState({
@@ -227,6 +238,9 @@ export class DriveSync {
       lastSyncedAt: null,
       error: null,
     });
+    if (isSavedToDrive) {
+      this.api?.resetScene();
+    }
   }
 
   async refreshDrawings() {
@@ -270,6 +284,12 @@ export class DriveSync {
   /** Call on every canvas change; syncs once the user pauses. */
   onSceneChange(elements: readonly OrderedExcalidrawElement[]) {
     const { connection, current } = this.getState();
+    // The first change after load is the restored canvas, which belongs to
+    // the linked drawing. Remembering it now lets a file opened from disk
+    // before the first sync (e.g. while offline) be noticed as a replacement.
+    if (current && !this.lastSyncedIds) {
+      this.lastSyncedIds = new Set(elements.map((element) => element.id));
+    }
     if (
       connection === "connected" &&
       current &&
@@ -316,9 +336,15 @@ export class DriveSync {
       return;
     }
 
+    const generation = this.linkGeneration;
+    const isStale = () => generation !== this.linkGeneration;
+
     this.setState({ syncStatus: "syncing", error: null });
     try {
       const metadata = await this.client.getDrawingMetadata(current.fileId);
+      if (isStale()) {
+        return;
+      }
       let driveHash = this.lastSyncedHash;
       let version = current.version;
 
@@ -327,6 +353,9 @@ export class DriveSync {
           await this.client.downloadDrawing(current.fileId),
           elements,
         );
+        if (isStale()) {
+          return;
+        }
         driveHash = hashSyncableElements(remote.elements);
         version = metadata.version;
 
@@ -359,6 +388,10 @@ export class DriveSync {
         );
         version = saved.version;
         this.updateListedDrawing(saved);
+        if (isStale()) {
+          // the upload went to the drawing it was read from; nothing to apply
+          return;
+        }
       }
 
       this.lastSyncedHash = localHash;
@@ -478,6 +511,14 @@ export class DriveSync {
         return;
       }
       const metadata = await this.client.getDrawingMetadata(fileId);
+      if (metadata.capabilities?.canEdit === false) {
+        // every save would be refused, so don't link it and lose edits
+        throw new Error(
+          t("googleDrive.errors.readOnly", {
+            name: toDrawingName(metadata.name),
+          }),
+        );
+      }
       const remote = parseDriveScene(
         await this.client.downloadDrawing(fileId),
         null,

@@ -1,6 +1,6 @@
 # Running Excalidraw on your own server
 
-This folder runs the whole app on one Linux server with Docker. Only accounts in your Google Workspace domain can open it, and every drawing, share link, collab room and image stays on that server or in each user's Google Drive.
+This folder runs the whole app on one Linux server with Docker. Only accounts in your Google Workspace domain can open it, and every drawing, share link, collab room and image stays on that server or in each user's Google Drive. The one exception is the shape library: browsing and publishing libraries use Excalidraw's public library site.
 
 | Service | Does |
 | --- | --- |

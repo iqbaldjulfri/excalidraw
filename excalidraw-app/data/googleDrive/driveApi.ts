@@ -12,7 +12,7 @@ const ROLE_KEY = "excalidrawRole";
 const ROLE_FOLDER = "drawings-folder";
 const ROLE_DRAWING = "drawing";
 
-const DRAWING_FIELDS = "id,name,modifiedTime,version";
+const DRAWING_FIELDS = "id,name,modifiedTime,version,capabilities(canEdit)";
 
 export type DriveDrawing = {
   id: string;
@@ -20,6 +20,7 @@ export type DriveDrawing = {
   modifiedTime: string;
   /** Drive bumps this on every change to the file, including our own writes. */
   version: string;
+  capabilities?: { canEdit?: boolean };
 };
 
 export class DriveApiError extends Error {

@@ -838,7 +838,8 @@
     "errors": {
       "fileMissing": "\"{{name}}\" is no longer in Drive, so this canvas stopped syncing to it.",
       "connectFailed": "Couldn't connect to Google Drive.",
-      "pickerUnavailable": "The Drive picker isn't set up on this server."
+      "pickerUnavailable": "The Drive picker isn't set up on this server.",
+      "readOnly": "You can only view \"{{name}}\" in Drive, so changes couldn't be saved to it. Ask its owner for edit access, or make a copy in Drive and open that."
     },
     "saveFolder": "New drawings are saved to {{name}}",
     "picker": {

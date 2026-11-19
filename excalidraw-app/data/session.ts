@@ -24,10 +24,57 @@ export const isAuthEnabled = () =>
 
 export const currentUserAtom = atom<CurrentUser | null>(null);
 
-export const signInUrl = () =>
-  `/auth/login?${new URLSearchParams({
-    returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
-  })}`;
+// Collab and share links keep their encryption key in the #fragment. Sending
+// it through sign-in would hand it to the server, so it waits in this tab's
+// sessionStorage instead. The server's sign-in page writes the same record.
+const RETURN_HASH_KEY = "excalidraw-return-hash";
+// long enough for a Google sign-in, short enough not to resurface later
+const RETURN_HASH_MAX_AGE_MS = 10 * 60 * 1000;
+
+type ReturnHash = { path: string; hash: string; at: number };
+
+const currentPath = () =>
+  `${window.location.pathname}${window.location.search}`;
+
+export const signInUrl = () => {
+  try {
+    if (window.location.hash) {
+      const record: ReturnHash = {
+        path: currentPath(),
+        hash: window.location.hash,
+        at: Date.now(),
+      };
+      sessionStorage.setItem(RETURN_HASH_KEY, JSON.stringify(record));
+    }
+  } catch {
+    // storage blocked: the link opens without its room after sign-in
+  }
+  return `/auth/login?${new URLSearchParams({ returnTo: currentPath() })}`;
+};
+
+/** Puts a link's #fragment back once sign-in returns to the same page. */
+export const restoreHashAfterSignIn = () => {
+  try {
+    const raw = sessionStorage.getItem(RETURN_HASH_KEY);
+    if (!raw) {
+      return;
+    }
+    sessionStorage.removeItem(RETURN_HASH_KEY);
+    const saved = JSON.parse(raw) as ReturnHash;
+    if (
+      !window.location.hash &&
+      saved.path === currentPath() &&
+      Date.now() - saved.at < RETURN_HASH_MAX_AGE_MS
+    ) {
+      window.history.replaceState(null, "", `${saved.path}${saved.hash}`);
+    }
+  } catch {
+    // unreadable record: nothing to restore
+  }
+};
+
+// at import: the app reads location.hash for the room while it first renders
+restoreHashAfterSignIn();
 
 export const fetchCurrentUser = async (): Promise<CurrentUser> => {
   const response = await fetch("/auth/me", { credentials: "same-origin" });

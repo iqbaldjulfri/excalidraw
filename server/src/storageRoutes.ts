@@ -14,7 +14,8 @@ const MAX_SHARE_LINK_BYTES = 10 * MiB;
 // room snapshots travel as base64 JSON, a third bigger than the bytes
 const MAX_ROOM_BYTES = 15 * MiB;
 
-// share links and images only ever add data, so they're what can fill the disk
+// share links, images and new rooms add data; saving an existing room only
+// replaces its snapshot, so that isn't counted
 const DAILY_UPLOAD_BYTES_PER_USER = 1024 * MiB;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -157,6 +158,9 @@ export const handleStorageRequest = async (
           )
         ) {
           return sendJSON(res, 400, { error: "invalid_scene" });
+        }
+        if (body.expectedRevision === null) {
+          quota.consume(user, JSON.stringify(body.scene).length);
         }
         const revision = await storage.writeRoom(
           roomId,

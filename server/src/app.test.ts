@@ -344,7 +344,12 @@ describe("/auth/check (reverse proxy gate)", () => {
     const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
 
     expect(response.status).toBe(401);
-    expect(html).toContain("location.hash");
+    // the fragment holds the room key: it's stashed in the tab, not sent here
+    expect(html).toContain("sessionStorage.setItem");
+    expect(html).toContain('returnTo="+encodeURIComponent(p)');
+    expect(html).not.toContain(
+      "encodeURIComponent(location.pathname+location.search+location.hash)",
+    );
     expect(nonce).toBeTruthy();
     expect(response.headers.get("content-security-policy")).toContain(
       `script-src 'nonce-${nonce}'`,
@@ -535,6 +540,26 @@ describe("sign-out and storage", () => {
     await Promise.all([update, deletion]);
 
     expect(await readdir(path.join(ctx.dataDir, "sessions"))).toEqual([]);
+  });
+
+  it("only removes session temp files old enough not to be mid-write", async () => {
+    await ctx.signIn();
+    const dir = path.join(ctx.dataDir, "sessions");
+    const store = new FileSessionStore(ctx.dataDir, Buffer.alloc(32, 7));
+    await writeFile(path.join(dir, "young.tmp"), "x");
+    await writeFile(path.join(dir, "old.tmp"), "x");
+    const twoHoursAgo = new Date(Date.now() - 2 * HOUR);
+    await utimes(path.join(dir, "old.tmp"), twoHoursAgo, twoHoursAgo);
+
+    await store.deleteExpired({
+      now: Date.now(),
+      maxAgeMs: 30 * 24 * HOUR,
+      idleMs: 7 * 24 * HOUR,
+    });
+
+    const names = await readdir(dir);
+    expect(names).toContain("young.tmp");
+    expect(names).not.toContain("old.tmp");
   });
 
   it("keeps no readable tokens or cookie values on disk", async () => {

@@ -50,7 +50,7 @@ Build the app with `VITE_APP_AUTH_ENABLED=true` so it shows the signed-in user a
 
 ## Storage
 
-This server also replaces Firebase and the public share-link backend, so drawings never leave your server. The browser encrypts everything before upload; the server never sees a key. Under `DATA_DIR/storage/` it keeps:
+This server also replaces Firebase and the public share-link backend, so drawings never leave your server. The browser encrypts everything before upload; the server never sees a key. Sign-in doesn't leak one either: the key-carrying `#fragment` of a collab or share link waits in the tab's `sessionStorage` while the user signs in, rather than travelling in the return URL. Under `DATA_DIR/storage/` it keeps:
 
 | Endpoint | Holds |
 | --- | --- |

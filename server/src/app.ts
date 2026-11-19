@@ -116,13 +116,19 @@ const page = (
       : ""
   }</body></html>`;
 
+/**
+ * The #fragment of collab and share links holds the encryption key, so it
+ * must not reach this server either: it waits in the tab's sessionStorage
+ * and the app puts it back after sign-in (see data/session.ts). The storage
+ * key and record shape must match `RETURN_HASH_KEY` there.
+ */
 const signInRedirectPage = (nonce: string) =>
   page("Signing in…", "Taking you to Google sign-in.", {
     href: "/auth/login",
     label: "Continue",
   }).replace(
     "</body>",
-    `<script nonce="${nonce}">location.replace("/auth/login?returnTo="+encodeURIComponent(location.pathname+location.search+location.hash))</script></body>`,
+    `<script nonce="${nonce}">var p=location.pathname+location.search;try{if(location.hash)sessionStorage.setItem("excalidraw-return-hash",JSON.stringify({path:p,hash:location.hash,at:Date.now()}))}catch(e){}location.replace("/auth/login?returnTo="+encodeURIComponent(p))</script></body>`,
   );
 
 export const createAuthApp = (deps: AuthAppDeps) => {
