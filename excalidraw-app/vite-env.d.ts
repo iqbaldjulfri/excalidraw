@@ -23,6 +23,8 @@ interface ImportMetaEnv {
   // "true" when served behind the self-hosted auth server (server/), which
   // gates sign-in and issues Google Drive tokens
   VITE_APP_AUTH_ENABLED: string;
+  // "true" for a company's own deployment: hides Excalidraw+ and AI features
+  VITE_APP_SELF_HOSTED: string;
   // where the dev server proxies /auth to; production uses the reverse proxy
   VITE_APP_AUTH_DEV_PROXY: string;
 

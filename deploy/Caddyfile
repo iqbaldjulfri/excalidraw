@@ -1,0 +1,26 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	# sign-in and stored drawings; the auth server checks sessions itself
+	@auth path /auth/* /api/*
+	handle @auth {
+		reverse_proxy auth:3015
+	}
+
+	# live collaboration, only for signed-in users
+	handle /socket.io/* {
+		forward_auth auth:3015 {
+			uri /auth/check
+		}
+		reverse_proxy room:80
+	}
+
+	# the app; signed-out visitors get the auth server's sign-in page, which
+	# keeps the #room or #json part of invite links
+	handle {
+		forward_auth auth:3015 {
+			uri /auth/check
+		}
+		reverse_proxy app:80
+	}
+}

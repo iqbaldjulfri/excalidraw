@@ -1,0 +1,49 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - auth
+      - room
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/app.Dockerfile
+      args:
+        PUBLIC_URL: https://${DOMAIN}
+    restart: unless-stopped
+
+  auth:
+    build: ../server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUBLIC_URL: https://${DOMAIN}
+      DATA_DIR: /data
+    volumes:
+      - auth_data:/data
+
+  room:
+    # pin a tested version for production; latest is upstream's current build
+    image: excalidraw/excalidraw-room:latest
+    restart: unless-stopped
+    environment:
+      PORT: "80"
+
+volumes:
+  caddy_data:
+  caddy_config:
+  # sessions and every stored drawing, share link and image
+  auth_data:
