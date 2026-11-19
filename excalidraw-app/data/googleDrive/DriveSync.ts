@@ -8,7 +8,7 @@ import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
 
 import { appJotaiStore, atom } from "../../app-jotai";
 
-import { SignedOutError } from "../session";
+import { SignedOutError, currentUserAtom } from "../session";
 
 import {
   DriveNotGrantedError,
@@ -24,11 +24,16 @@ import {
   serializeDriveScene,
 } from "./mergeScene";
 
+import { pickDrawingFile, pickFolder } from "./picker";
+
 import type { DriveDrawing } from "./driveApi";
+import type { PickedItem } from "./picker";
 
 // localStorage, not sessionStorage: tabs share one canvas in localStorage, so
 // they must also share which Drive drawing that canvas belongs to.
 const LINK_STORAGE_KEY = "excalidraw-gdrive-link";
+const SAVE_FOLDER_STORAGE_KEY = "excalidraw-gdrive-save-folder";
+const DEFAULT_FOLDER_NAME = "Excalidraw";
 
 const SYNC_DEBOUNCE_MS = 2000;
 
@@ -58,8 +63,39 @@ export type DriveState = {
   syncStatus: DriveSyncStatus;
   lastSyncedAt: number | null;
   error: string | null;
+  /** Where new drawings are created. */
+  saveFolder: DriveFolder | null;
   /** Opening, creating or deleting a drawing; blocks other list actions. */
   busy: boolean;
+};
+
+export type DriveFolder = { id: string; name: string };
+
+type Pickers = {
+  pickDrawingFile: () => Promise<PickedItem | null>;
+  pickFolder: () => Promise<PickedItem | null>;
+};
+
+const readSaveFolder = (): DriveFolder | null => {
+  try {
+    const raw = localStorage.getItem(SAVE_FOLDER_STORAGE_KEY);
+    const folder = raw ? (JSON.parse(raw) as DriveFolder) : null;
+    return folder?.id ? folder : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeSaveFolder = (folder: DriveFolder | null) => {
+  try {
+    if (folder) {
+      localStorage.setItem(SAVE_FOLDER_STORAGE_KEY, JSON.stringify(folder));
+    } else {
+      localStorage.removeItem(SAVE_FOLDER_STORAGE_KEY);
+    }
+  } catch {
+    // storage blocked: new drawings go to the default folder next time
+  }
 };
 
 const readLink = (): DriveLink | null => {
@@ -91,6 +127,7 @@ export const driveStateAtom = atom<DriveState>({
   syncStatus: "idle",
   lastSyncedAt: null,
   error: null,
+  saveFolder: null,
   busy: false,
 });
 
@@ -100,20 +137,23 @@ const getErrorMessage = (error: unknown) =>
 export class DriveSync {
   private api: ExcalidrawImperativeAPI | null = null;
   private readonly client: DriveClient;
-  private folderId: string | null = null;
   private syncChain: Promise<void> = Promise.resolve();
   /** Hash of the elements Drive holds, so unchanged canvases skip uploads. */
   private lastSyncedHash: number | null = null;
   /** Element ids of the last synced scene, to notice a replaced canvas. */
   private lastSyncedIds: Set<string> | null = null;
 
+  private readonly pickers: Pickers;
+
   constructor(
     private readonly opts: {
       client?: DriveClient;
       confirmReplaceCanvas?: () => Promise<boolean>;
+      pickers?: Pickers;
     } = {},
   ) {
     this.client = opts.client ?? new DriveClient(getDriveAccessToken);
+    this.pickers = opts.pickers ?? googlePickers;
   }
 
   getState() {
@@ -155,9 +195,9 @@ export class DriveSync {
   async connect(opts: { syncNow: boolean } = { syncNow: true }) {
     this.setState({ connection: "connecting", error: null });
     try {
-      this.folderId = await this.client.ensureFolder();
-      const drawings = await this.client.listDrawings(this.folderId);
-      this.setState({ connection: "connected", drawings });
+      const saveFolder = readSaveFolder() ?? (await this.defaultFolder());
+      const drawings = await this.client.listDrawings();
+      this.setState({ connection: "connected", drawings, saveFolder });
     } catch (error) {
       this.handleError(error, { whileConnecting: true });
       return;
@@ -167,6 +207,10 @@ export class DriveSync {
     }
   }
 
+  private async defaultFolder(): Promise<DriveFolder> {
+    return { id: await this.client.ensureFolder(), name: DEFAULT_FOLDER_NAME };
+  }
+
   /**
    * Call before signing out. Tabs and the next user of this browser share
    * localStorage, so nothing may keep pointing at this user's Drive.
@@ -174,10 +218,11 @@ export class DriveSync {
   async prepareForSignOut() {
     await this.syncNow();
     this.unlink();
-    this.folderId = null;
+    writeSaveFolder(null);
     this.setState({
       connection: "signedOut",
       drawings: [],
+      saveFolder: null,
       syncStatus: "idle",
       lastSyncedAt: null,
       error: null,
@@ -185,13 +230,11 @@ export class DriveSync {
   }
 
   async refreshDrawings() {
-    if (!this.folderId) {
+    if (this.getState().connection !== "connected") {
       return;
     }
     try {
-      this.setState({
-        drawings: await this.client.listDrawings(this.folderId),
-      });
+      this.setState({ drawings: await this.client.listDrawings() });
     } catch (error) {
       this.handleError(error);
     }
@@ -472,7 +515,8 @@ export class DriveSync {
   createDrawing(opts: { fromCanvas: boolean }) {
     return this.runBusy(async () => {
       const api = this.api;
-      if (!api || !this.folderId) {
+      const { saveFolder } = this.getState();
+      if (!api || !saveFolder) {
         return;
       }
       if (!opts.fromCanvas) {
@@ -499,15 +543,32 @@ export class DriveSync {
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       }
-      const created = await this.client.createDrawing({
-        folderId: this.folderId,
-        name,
-        content: serializeDriveScene(
-          elements,
-          api.getAppState(),
-          api.getFiles(),
-        ),
-      });
+      const content = serializeDriveScene(
+        elements,
+        api.getAppState(),
+        api.getFiles(),
+      );
+      let created: DriveDrawing;
+      try {
+        created = await this.client.createDrawing({
+          folderId: saveFolder.id,
+          name,
+          content,
+        });
+      } catch (error) {
+        if (!isDriveNotFoundError(error)) {
+          throw error;
+        }
+        // the chosen folder was deleted in Drive: fall back to the default
+        const fallback = await this.defaultFolder();
+        writeSaveFolder(null);
+        this.setState({ saveFolder: fallback });
+        created = await this.client.createDrawing({
+          folderId: fallback.id,
+          name,
+          content,
+        });
+      }
       this.lastSyncedHash = hashSyncableElements(elements);
       this.lastSyncedIds = new Set(elements.map((element) => element.id));
       this.setCurrent({
@@ -518,6 +579,41 @@ export class DriveSync {
       this.updateListedDrawing(created);
       this.setState({ syncStatus: "synced", lastSyncedAt: Date.now() });
     });
+  }
+
+  /** Opens a drawing the user picks anywhere in their Drive. */
+  async openFromDrive() {
+    const picked = await this.runPicker(this.pickers.pickDrawingFile);
+    if (!picked) {
+      return;
+    }
+    await this.openDrawing(picked.id);
+    if (this.getState().current?.fileId !== picked.id) {
+      // opening failed or was cancelled; don't list a file we couldn't read
+      return;
+    }
+    try {
+      this.updateListedDrawing(await this.client.tagAsDrawing(picked.id));
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  async chooseSaveFolder() {
+    const picked = await this.runPicker(this.pickers.pickFolder);
+    if (picked) {
+      writeSaveFolder(picked);
+      this.setState({ saveFolder: picked });
+    }
+  }
+
+  private async runPicker(pick: () => Promise<PickedItem | null>) {
+    try {
+      return await pick();
+    } catch (error) {
+      this.handleError(error);
+      return null;
+    }
   }
 
   /** The default name only changes once a minute, so it collides easily. */
@@ -582,5 +678,29 @@ const confirmReplaceCanvas = () =>
     actionLabel: t("googleDrive.replaceCanvas.button"),
     color: "danger",
   });
+
+const pickerOptions = async () => {
+  const config = appJotaiStore.get(currentUserAtom)?.picker;
+  if (!config) {
+    throw new Error(t("googleDrive.errors.pickerUnavailable"));
+  }
+  return {
+    config,
+    accessToken: await getDriveAccessToken(),
+  };
+};
+
+const googlePickers: Pickers = {
+  pickDrawingFile: async () =>
+    pickDrawingFile({
+      ...(await pickerOptions()),
+      title: t("googleDrive.picker.openTitle"),
+    }),
+  pickFolder: async () =>
+    pickFolder({
+      ...(await pickerOptions()),
+      title: t("googleDrive.picker.folderTitle"),
+    }),
+};
 
 export const driveSync = new DriveSync();

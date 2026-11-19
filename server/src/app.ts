@@ -451,6 +451,8 @@ export const createAuthApp = (deps: AuthAppDeps) => {
       name: user.name,
       picture: user.picture,
       driveAccess: hasDriveAccess(session.data),
+      // a browser key, restricted to this site in Google Cloud; not a secret
+      picker: config.picker,
     });
   };
 

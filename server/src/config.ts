@@ -11,6 +11,8 @@ export type Config = {
   googleClientSecret: string;
   /** Google Workspace domain whose accounts may sign in (the `hd` claim). */
   allowedDomain: string;
+  /** For the browser's Google Picker; both or neither. */
+  picker: { apiKey: string; appId: string } | null;
   dataDir: string;
   /** AES-256 key for session files and the login cookie. */
   encryptionKey: Buffer;
@@ -31,6 +33,20 @@ const required = (env: NodeJS.ProcessEnv, name: string) => {
   return value;
 };
 
+const loadPickerConfig = (env: NodeJS.ProcessEnv) => {
+  const apiKey = env.GOOGLE_PICKER_API_KEY?.trim();
+  const appId = env.GOOGLE_PROJECT_NUMBER?.trim();
+  if (!apiKey && !appId) {
+    return null;
+  }
+  if (!apiKey || !appId) {
+    throw new Error(
+      "Set both GOOGLE_PICKER_API_KEY and GOOGLE_PROJECT_NUMBER, or neither",
+    );
+  }
+  return { apiKey, appId };
+};
+
 export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
   const publicUrl = new URL(required(env, "PUBLIC_URL"));
   const sessionSecret = required(env, "SESSION_SECRET");
@@ -44,6 +60,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     googleClientId: required(env, "GOOGLE_CLIENT_ID"),
     googleClientSecret: required(env, "GOOGLE_CLIENT_SECRET"),
     allowedDomain: required(env, "ALLOWED_DOMAIN").toLowerCase(),
+    picker: loadPickerConfig(env),
     dataDir: env.DATA_DIR || "./data",
     // hashing lets any long random string serve as the secret
     encryptionKey: createHash("sha256").update(sessionSecret).digest(),

@@ -67,6 +67,21 @@
     }
   }
 
+  .drive-tab__folder {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--color-gray-50);
+
+    span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  }
+
   .drive-tab__account {
     display: flex;
     flex-direction: column;

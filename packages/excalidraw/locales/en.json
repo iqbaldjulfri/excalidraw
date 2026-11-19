@@ -819,7 +819,9 @@
       "trash": "Move to Drive trash",
       "signOut": "Sign out",
       "signInAgain": "Sign in again",
-      "retry": "Try again"
+      "retry": "Try again",
+      "openFromDrive": "Open from Drive…",
+      "changeFolder": "Change"
     },
     "list": {
       "current": "Open now",
@@ -835,7 +837,13 @@
     },
     "errors": {
       "fileMissing": "\"{{name}}\" is no longer in Drive, so this canvas stopped syncing to it.",
-      "connectFailed": "Couldn't connect to Google Drive."
+      "connectFailed": "Couldn't connect to Google Drive.",
+      "pickerUnavailable": "The Drive picker isn't set up on this server."
+    },
+    "saveFolder": "New drawings are saved to {{name}}",
+    "picker": {
+      "openTitle": "Open an Excalidraw drawing",
+      "folderTitle": "Choose where new drawings are saved"
     }
   }
 }

@@ -115,6 +115,7 @@ const setUp = async () => {
     googleClientId: CLIENT_ID,
     googleClientSecret: "secret",
     allowedDomain: DOMAIN,
+    picker: { apiKey: "browser-key", appId: "1234567890" },
     dataDir,
     encryptionKey: Buffer.alloc(32, 7),
     secureCookies: true,
@@ -244,6 +245,7 @@ describe("sign-in", () => {
       name: "Alice",
       picture: null,
       driveAccess: true,
+      picker: { apiKey: "browser-key", appId: "1234567890" },
     });
   });
 

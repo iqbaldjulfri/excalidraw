@@ -3,6 +3,7 @@ import clsx from "clsx";
 
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
 import {
+  LoadIcon,
   PlusIcon,
   TrashIcon,
   pencilIcon,
@@ -245,6 +246,7 @@ const AccountFooter = () => {
 export const DriveSidebarTab = () => {
   const { t } = useI18n();
   const state = useAtomValue(driveStateAtom);
+  const hasPicker = !!useAtomValue(currentUserAtom)?.picker;
 
   if (state.connection === "disabled") {
     return null;
@@ -308,6 +310,34 @@ export const DriveSidebarTab = () => {
       >
         {t("googleDrive.actions.newDrawing")}
       </FilledButton>
+
+      {hasPicker && (
+        <>
+          <FilledButton
+            fullWidth
+            variant="outlined"
+            icon={LoadIcon}
+            status={state.busy ? "loading" : null}
+            onClick={() => driveSync.openFromDrive()}
+          >
+            {t("googleDrive.actions.openFromDrive")}
+          </FilledButton>
+          {state.saveFolder && (
+            <div className="drive-tab__folder">
+              <span title={state.saveFolder.name}>
+                {t("googleDrive.saveFolder", { name: state.saveFolder.name })}
+              </span>
+              <button
+                type="button"
+                className="drive-tab__link"
+                onClick={() => driveSync.chooseSaveFolder()}
+              >
+                {t("googleDrive.actions.changeFolder")}
+              </button>
+            </div>
+          )}
+        </>
+      )}
 
       {state.drawings.length ? (
         <ul className="drive-tab__list">

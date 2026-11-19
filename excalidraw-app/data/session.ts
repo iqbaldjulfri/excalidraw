@@ -7,6 +7,7 @@ export type CurrentUser = {
   name: string;
   picture: string | null;
   driveAccess: boolean;
+  picker: { apiKey: string; appId: string } | null;
 };
 
 /** The auth server's session is gone; only a new sign-in fixes it. */

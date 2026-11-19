@@ -35,9 +35,6 @@ export const isDriveAuthError = (error: unknown) =>
 export const isDriveNotFoundError = (error: unknown) =>
   error instanceof DriveApiError && error.status === 404;
 
-const escapeQueryValue = (value: string) =>
-  value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-
 export const toDriveFileName = (name: string) =>
   name.endsWith(".excalidraw") ? name : `${name}.excalidraw`;
 
@@ -112,9 +109,9 @@ export class DriveClient {
     return folder.id;
   }
 
-  async listDrawings(folderId: string): Promise<DriveDrawing[]> {
+  /** Every drawing the app created or opened, in whichever folder it lives. */
+  async listDrawings(): Promise<DriveDrawing[]> {
     const query = [
-      `'${escapeQueryValue(folderId)}' in parents`,
       `appProperties has { key='${ROLE_KEY}' and value='${ROLE_DRAWING}' }`,
       "trashed=false",
     ].join(" and ");
@@ -211,6 +208,20 @@ export class DriveClient {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: toDriveFileName(name) }),
+      },
+    );
+  }
+
+  /** Marks a file the user picked, so it shows in the drawings list. */
+  tagAsDrawing(fileId: string): Promise<DriveDrawing> {
+    return this.requestJSON<DriveDrawing>(
+      `${DRIVE_API}/files/${encodeURIComponent(
+        fileId,
+      )}?fields=${DRAWING_FIELDS}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appProperties: { [ROLE_KEY]: ROLE_DRAWING } }),
       },
     );
   }

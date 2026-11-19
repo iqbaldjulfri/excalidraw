@@ -16,7 +16,7 @@ import {
   DriveNotGrantedError,
   getDriveAccessToken,
 } from "../data/googleDrive/auth";
-import { DriveClient } from "../data/googleDrive/driveApi";
+import { DriveApiError, DriveClient } from "../data/googleDrive/driveApi";
 import { DriveSync, driveStateAtom } from "../data/googleDrive/DriveSync";
 import {
   mergeDriveScene,
@@ -77,7 +77,14 @@ const createFakeClient = (remote: { content: string; version: string }) => {
       remote.version = String(Number(remote.version) + 1);
       return drawingMeta(remote.version);
     }),
-    createDrawing: vi.fn(),
+    createDrawing: vi.fn(
+      async (opts: { folderId: string; name: string; content: string }) => ({
+        ...drawingMeta("1"),
+        id: `new-in-${opts.folderId}`,
+        name: `${opts.name}.excalidraw`,
+      }),
+    ),
+    tagAsDrawing: vi.fn(async () => drawingMeta(remote.version)),
     renameDrawing: vi.fn(),
     trashDrawing: vi.fn(),
   };
@@ -125,6 +132,10 @@ const setUpSync = async (opts: {
   linkedVersion: string;
   remoteVersion: string;
   confirmReplaceCanvas?: () => Promise<boolean>;
+  pickers?: {
+    pickDrawingFile: () => Promise<{ id: string; name: string } | null>;
+    pickFolder: () => Promise<{ id: string; name: string } | null>;
+  };
 }) => {
   localStorage.setItem(
     LINK_KEY,
@@ -143,6 +154,7 @@ const setUpSync = async (opts: {
   const sync = new DriveSync({
     client: client as unknown as DriveClient,
     confirmReplaceCanvas: opts.confirmReplaceCanvas,
+    pickers: opts.pickers,
   });
   await sync.init(fakeApi.api as unknown as ExcalidrawImperativeAPI, {
     isExternalScene: false,
@@ -425,5 +437,109 @@ describe("getDriveAccessToken", () => {
 
     // the slower normal fetch must not replace the newer cached token
     expect(await getDriveAccessToken()).toBe("fresh");
+  });
+});
+
+describe("DriveSync picker and save folder", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  const base = {
+    local: scene(rect("a", 1)),
+    remote: scene(rect("b", 1)),
+    linkedVersion: "7",
+    remoteVersion: "7",
+  };
+
+  it("saves new drawings to the default Excalidraw folder until another is chosen", async () => {
+    const { sync, client } = await setUpSync({
+      ...base,
+      pickers: {
+        pickDrawingFile: async () => null,
+        pickFolder: async () => ({ id: "team-folder", name: "Team" }),
+      },
+    });
+    expect(appJotaiStore.get(driveStateAtom).saveFolder).toEqual({
+      id: "folder-1",
+      name: "Excalidraw",
+    });
+
+    await sync.chooseSaveFolder();
+    await sync.createDrawing({ fromCanvas: true });
+
+    expect(client.createDrawing.mock.calls[0][0].folderId).toBe("team-folder");
+    expect(
+      JSON.parse(localStorage.getItem("excalidraw-gdrive-save-folder")!),
+    ).toEqual({ id: "team-folder", name: "Team" });
+  });
+
+  it("falls back to the default folder when the chosen one is gone", async () => {
+    localStorage.setItem(
+      "excalidraw-gdrive-save-folder",
+      JSON.stringify({ id: "deleted", name: "Old" }),
+    );
+    const { sync, client } = await setUpSync(base);
+    client.createDrawing.mockRejectedValueOnce(
+      new DriveApiError("File not found", 404),
+    );
+
+    await sync.createDrawing({ fromCanvas: true });
+
+    expect(
+      client.createDrawing.mock.calls.map(([opts]) => opts.folderId),
+    ).toEqual(["deleted", "folder-1"]);
+    expect(appJotaiStore.get(driveStateAtom).saveFolder?.id).toBe("folder-1");
+  });
+
+  it("opens a picked file and adds it to the drawings list", async () => {
+    const { sync, client, api } = await setUpSync({
+      ...base,
+      confirmReplaceCanvas: async () => true,
+      pickers: {
+        pickDrawingFile: async () => ({
+          id: "file-1",
+          name: "Plan.excalidraw",
+        }),
+        pickFolder: async () => null,
+      },
+    });
+    sync.unlink();
+
+    await sync.openFromDrive();
+
+    expect(ids(api.getSceneElementsIncludingDeleted())).toEqual(["b@1"]);
+    expect(client.tagAsDrawing).toHaveBeenCalledWith("file-1");
+    expect(appJotaiStore.get(driveStateAtom).current?.fileId).toBe("file-1");
+  });
+
+  it("doesn't tag a picked file it couldn't open", async () => {
+    const { sync, client } = await setUpSync({
+      ...base,
+      confirmReplaceCanvas: async () => true,
+      pickers: {
+        pickDrawingFile: async () => ({ id: "file-1", name: "notes.txt" }),
+        pickFolder: async () => null,
+      },
+    });
+    sync.unlink();
+    client.downloadDrawing.mockResolvedValueOnce("just some text");
+
+    await sync.openFromDrive();
+
+    expect(client.tagAsDrawing).not.toHaveBeenCalled();
+    expect(appJotaiStore.get(driveStateAtom).error).toBeTruthy();
+  });
+
+  it("forgets the chosen save folder on sign-out", async () => {
+    localStorage.setItem(
+      "excalidraw-gdrive-save-folder",
+      JSON.stringify({ id: "team-folder", name: "Team" }),
+    );
+    const { sync } = await setUpSync(base);
+
+    await sync.prepareForSignOut();
+
+    expect(localStorage.getItem("excalidraw-gdrive-save-folder")).toBeNull();
   });
 });
