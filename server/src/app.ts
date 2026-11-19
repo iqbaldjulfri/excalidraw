@@ -14,10 +14,15 @@ import type { FileSessionStore, SessionData } from "./sessions";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 export const SESSION_COOKIE = "exc_session";
-const LOGIN_COOKIE = "exc_login";
+// suffixed with part of the state, so sign-ins in two tabs don't overwrite
+// each other's pending login
+const LOGIN_COOKIE_PREFIX = "exc_login_";
+const loginCookieName = (state: string) =>
+  `${LOGIN_COOKIE_PREFIX}${state.slice(0, 12)}`;
 const LOGIN_TTL_MS = 10 * 60 * 1000;
 // writing lastSeenAt on every asset request would mean a disk write each time
 const LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60 * 1000;
+const REVERIFY_RETRY_MS = 5 * 60 * 1000;
 // hand out a fresh Drive token before the browser's copy can expire mid-request
 const ACCESS_TOKEN_MIN_LIFETIME_MS = 2 * 60 * 1000;
 
@@ -41,10 +46,15 @@ const parseCookies = (header: string | undefined) => {
   const cookies: Record<string, string> = {};
   for (const part of header?.split(";") ?? []) {
     const index = part.indexOf("=");
-    if (index > 0) {
+    if (index <= 0) {
+      continue;
+    }
+    try {
       cookies[part.slice(0, index).trim()] = decodeURIComponent(
         part.slice(index + 1).trim(),
       );
+    } catch {
+      // another app's cookie on this domain; it must not break sign-in
     }
   }
   return cookies;
@@ -59,9 +69,32 @@ const escapeHtml = (value: string) =>
       ]!),
   );
 
-/** Only same-site paths, so the login can't be used as an open redirect. */
-export const sanitizeReturnTo = (value: string | null | undefined) =>
-  value && value.startsWith("/") && !/^\/[/\\]/.test(value) ? value : "/";
+const isUnsafeUrlChar = (char: string) => {
+  const code = char.charCodeAt(0);
+  return code < 0x20 || code === 0x7f || char === "\\";
+};
+
+/**
+ * Only paths on our own origin, so sign-in can't be used as an open redirect.
+ * Browsers strip tabs and newlines and read "\\" as "/", so "/\t/evil.test"
+ * would become "//evil.test": reject those before resolving.
+ */
+export const sanitizeReturnTo = (
+  value: string | null | undefined,
+  origin: string,
+) => {
+  if (!value?.startsWith("/") || [...value].some(isUnsafeUrlChar)) {
+    return "/";
+  }
+  try {
+    const url = new URL(value, origin);
+    return url.origin === origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : "/";
+  } catch {
+    return "/";
+  }
+};
 
 const page = (
   title: string,
@@ -80,10 +113,21 @@ const page = (
       : ""
   }</body></html>`;
 
+const signInRedirectPage = (nonce: string) =>
+  page("Signing in…", "Taking you to Google sign-in.", {
+    href: "/auth/login",
+    label: "Continue",
+  }).replace(
+    "</body>",
+    `<script nonce="${nonce}">location.replace("/auth/login?returnTo="+encodeURIComponent(location.pathname+location.search+location.hash))</script></body>`,
+  );
+
 export const createAuthApp = (deps: AuthAppDeps) => {
   const { config, google, sessions } = deps;
   const now = () => (deps.now ?? Date.now)();
   const refreshes = new Map<string, Promise<SessionData | null>>();
+  // without this, every request during a Google outage would retry and wait
+  const failedReverifyAt = new Map<string, number>();
 
   const cookie = (
     name: string,
@@ -142,9 +186,6 @@ export const createAuthApp = (deps: AuthAppDeps) => {
       ...headers,
     });
 
-  const loginUrl = (returnTo: string) =>
-    `/auth/login?${new URLSearchParams({ returnTo })}`;
-
   /** One refresh per session at a time, however many requests ask for it. */
   const refreshSession = (id: string, data: SessionData) => {
     let pending = refreshes.get(id);
@@ -184,21 +225,28 @@ export const createAuthApp = (deps: AuthAppDeps) => {
       return null;
     }
 
-    if (time - data.verifiedAt > config.reverifyIntervalMs) {
+    const lastFailure = failedReverifyAt.get(id);
+    if (
+      time - data.verifiedAt > config.reverifyIntervalMs &&
+      (lastFailure === undefined || time - lastFailure > REVERIFY_RETRY_MS)
+    ) {
       try {
         data = (await refreshSession(id, data)) ?? data;
+        failedReverifyAt.delete(id);
       } catch (error) {
+        failedReverifyAt.set(id, time);
         if (error instanceof GrantRevokedError) {
           // account disabled, deleted or access revoked: end the session
+          failedReverifyAt.delete(id);
           await sessions.delete(id);
           return null;
         }
-        // Google unreachable: keep working for a while rather than lock
-        // everyone out, but not forever
-        if (time - data.verifiedAt > config.reverifyGraceMs) {
-          return null;
-        }
       }
+    }
+    // Google unreachable: keep working for a while rather than lock everyone
+    // out, but not forever
+    if (time - data.verifiedAt > config.reverifyGraceMs) {
+      return null;
     }
 
     if (time - data.lastSeenAt > LAST_SEEN_WRITE_INTERVAL_MS) {
@@ -216,7 +264,10 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     const pending: PendingLogin = {
       state: randomToken(),
       codeVerifier: randomToken(48),
-      returnTo: sanitizeReturnTo(url.searchParams.get("returnTo")),
+      returnTo: sanitizeReturnTo(
+        url.searchParams.get("returnTo"),
+        config.publicUrl.origin,
+      ),
       expiresAt: now() + LOGIN_TTL_MS,
     };
     send(res, 302, "", {
@@ -225,7 +276,7 @@ export const createAuthApp = (deps: AuthAppDeps) => {
         codeChallenge: sha256Base64Url(pending.codeVerifier),
       }),
       "Set-Cookie": cookie(
-        LOGIN_COOKIE,
+        loginCookieName(pending.state),
         encrypt(config.encryptionKey, JSON.stringify(pending)),
         { maxAgeSec: LOGIN_TTL_MS / 1000, path: "/auth" },
       ),
@@ -237,16 +288,16 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     url: URL,
     res: ServerResponse,
   ) => {
-    const clearLogin = cookie(LOGIN_COOKIE, "", {
+    const state = url.searchParams.get("state") ?? "";
+    const clearLogin = cookie(loginCookieName(state), "", {
       maxAgeSec: 0,
       path: "/auth",
     });
     const retry = { href: "/auth/login", label: "Try again" };
 
-    const encoded = parseCookies(req.headers.cookie)[LOGIN_COOKIE];
+    const encoded = parseCookies(req.headers.cookie)[loginCookieName(state)];
     const json = encoded ? decrypt(config.encryptionKey, encoded) : null;
     const pending = json ? (JSON.parse(json) as PendingLogin) : null;
-    const state = url.searchParams.get("state") ?? "";
 
     if (
       !pending ||
@@ -365,17 +416,16 @@ export const createAuthApp = (deps: AuthAppDeps) => {
       send(res, 200, "", { "X-Auth-Email": session.data.user.email });
       return;
     }
-    const originalUri = req.headers["x-forwarded-uri"];
     const wantsPage =
       req.headers["x-forwarded-method"] === "GET" &&
       (req.headers.accept ?? "").includes("text/html");
     if (wantsPage) {
-      send(res, 302, "", {
-        Location: loginUrl(
-          sanitizeReturnTo(
-            Array.isArray(originalUri) ? originalUri[0] : originalUri,
-          ),
-        ),
+      // Collab and share links keep their room key in the #fragment, which
+      // browsers never send to a server, so a server redirect would drop it.
+      // A script on the page can read it.
+      const nonce = randomToken(16);
+      sendPage(res, 401, signInRedirectPage(nonce), {
+        "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`,
       });
     } else {
       send(res, 401, "");

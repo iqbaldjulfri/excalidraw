@@ -417,7 +417,8 @@ const ExcalidrawWrapper = () => {
   const currentUser = useCurrentUser();
 
   useEffect(() => {
-    if (collabAPI && currentUser && !importUsernameFromLocalStorage()) {
+    // null only: an empty name is the user's choice to stay anonymous
+    if (collabAPI && currentUser && importUsernameFromLocalStorage() === null) {
       collabAPI.setUsername(currentUser.name);
     }
   }, [collabAPI, currentUser]);

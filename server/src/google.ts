@@ -15,6 +15,9 @@ const ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 // tolerate small clock drift between this server and Google
 const CLOCK_SKEW_SEC = 60;
 const DEFAULT_KEYS_MAX_AGE_MS = 60 * 60 * 1000;
+// /auth/check sits in front of every request, so a hung Google call must not
+// hang the site
+const REQUEST_TIMEOUT_MS = 5000;
 
 export type IdTokenClaims = {
   sub: string;
@@ -104,6 +107,7 @@ export class GoogleOAuth {
 
   private async tokenRequest(body: Record<string, string>) {
     const response = await this.fetch(GOOGLE_ENDPOINTS.token, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -162,7 +166,9 @@ export class GoogleOAuth {
 
   private async getKey(kid: string, forceReload: boolean) {
     if (forceReload || this.now() >= this.keysExpireAt) {
-      const response = await this.fetch(GOOGLE_ENDPOINTS.certs);
+      const response = await this.fetch(GOOGLE_ENDPOINTS.certs, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
       if (!response.ok) {
         throw new GoogleError("Couldn't load Google's signing keys", 502);
       }

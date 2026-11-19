@@ -232,8 +232,7 @@ const AccountFooter = () => {
         type="button"
         className="drive-tab__link"
         onClick={async () => {
-          // finish the pending upload so sign-out never drops recent edits
-          await driveSync.syncNow();
+          await driveSync.prepareForSignOut();
           await signOut();
         }}
       >

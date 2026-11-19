@@ -154,7 +154,10 @@ export default defineConfig(({ mode }) => {
       proxy:
         envVars.VITE_APP_AUTH_ENABLED === "true"
           ? {
-              "/auth": {
+              // trailing slash: a bare "/auth" also catches modules like
+              // /authors.ts. Not a "^" regex: vite-plugin-html exempts proxy
+              // keys from its HTML fallback only by literal path prefix.
+              "/auth/": {
                 target: envVars.VITE_APP_AUTH_DEV_PROXY || "http://localhost:3015",
                 changeOrigin: false,
               },

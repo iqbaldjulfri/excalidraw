@@ -12,7 +12,7 @@ The reverse proxy serves everything from one domain and asks this server about e
 | `/socket.io/*`  | `excalidraw-room` (live collab) | yes                    |
 | everything else | the built app (static files)    | yes                    |
 
-`GET /auth/check` answers `200` with an `X-Auth-Email` header for a signed-in user. For a signed-out page load (`GET` with `Accept: text/html`) it answers a redirect to sign-in that returns to the original URL; for anything else, `401`. It reads the original method and path from `X-Forwarded-Method` and `X-Forwarded-Uri`.
+`GET /auth/check` answers `200` with an `X-Auth-Email` header for a signed-in user. For a signed-out page load (`GET` with `Accept: text/html`) it answers `401` with a small page whose script sends the browser to sign-in. A script is used because collab and share links keep their key in the URL `#fragment`, which never reaches a server. For anything else it answers a bare `401`. The proxy must pass these responses through to the browser. It reads the original method and path from `X-Forwarded-Method` and `X-Forwarded-Uri`.
 
 Sessions last up to 30 days, or 7 days without use. Every hour the server re-checks each active session with Google, so a disabled or deleted account loses access within about an hour. If Google can't be reached, sessions keep working for up to 24 hours from their last successful check.
 

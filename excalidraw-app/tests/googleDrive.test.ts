@@ -12,7 +12,10 @@ import type {
 
 import { appJotaiStore } from "../app-jotai";
 import { SignedOutError } from "../data/session";
-import { DriveNotGrantedError } from "../data/googleDrive/auth";
+import {
+  DriveNotGrantedError,
+  getDriveAccessToken,
+} from "../data/googleDrive/auth";
 import { DriveClient } from "../data/googleDrive/driveApi";
 import { DriveSync, driveStateAtom } from "../data/googleDrive/DriveSync";
 import {
@@ -281,6 +284,21 @@ describe("DriveSync", () => {
     expect(appJotaiStore.get(driveStateAtom).current?.fileId).toBe("file-1");
   });
 
+  it("leaves no link to this user's Drive after sign-out", async () => {
+    const { sync, client } = await setUpSync({
+      local: scene(rect("a", 2)),
+      remote: scene(rect("a", 1)),
+      linkedVersion: "7",
+      remoteVersion: "7",
+    });
+
+    await sync.prepareForSignOut();
+
+    expect(client.updateDrawingContent).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(LINK_KEY)).toBeNull();
+    expect(appJotaiStore.get(driveStateAtom).drawings).toEqual([]);
+  });
+
   it("connects on startup without any user action", async () => {
     const { client } = await setUpSync({
       local: scene(rect("a", 1)),
@@ -372,5 +390,40 @@ describe("DriveClient", () => {
       [{ forceRefresh: false }],
       [{ forceRefresh: true }],
     ]);
+  });
+});
+
+describe("getDriveAccessToken", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("doesn't hand a forced refresh the result of a normal fetch already in flight", async () => {
+    let releaseNormal!: () => void;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("refresh=1")) {
+        return Response.json({
+          accessToken: "fresh",
+          expiresAt: Date.now() + 3e6,
+        });
+      }
+      await new Promise<void>((resolve) => {
+        releaseNormal = resolve;
+      });
+      return Response.json({
+        accessToken: "stale",
+        expiresAt: Date.now() + 1e6,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const normal = getDriveAccessToken();
+    const forced = getDriveAccessToken({ forceRefresh: true });
+    expect(await forced).toBe("fresh");
+    releaseNormal();
+    await normal;
+
+    // the slower normal fetch must not replace the newer cached token
+    expect(await getDriveAccessToken()).toBe("fresh");
   });
 });

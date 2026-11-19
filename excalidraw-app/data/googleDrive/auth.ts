@@ -14,7 +14,12 @@ const EXPIRY_MARGIN_MS = 60 * 1000;
 type DriveToken = { accessToken: string; expiresAt: number };
 
 let cachedToken: DriveToken | null = null;
-let pendingToken: Promise<DriveToken> | null = null;
+// forced and normal fetches are kept apart, so a forced refresh never just
+// receives a normal fetch's (possibly rejected) token
+const pendingTokens: {
+  normal: Promise<DriveToken> | null;
+  forced: Promise<DriveToken> | null;
+} = { normal: null, forced: null };
 
 export const isGoogleDriveEnabled = isAuthEnabled;
 
@@ -50,15 +55,21 @@ export const getDriveAccessToken = async (
   ) {
     return cachedToken.accessToken;
   }
-  if (!pendingToken) {
-    pendingToken = fetchDriveToken(!!opts.forceRefresh)
+  const kind = opts.forceRefresh ? "forced" : "normal";
+  let pending = pendingTokens[kind];
+  if (!pending) {
+    pending = fetchDriveToken(kind === "forced")
       .then((token) => {
-        cachedToken = token;
+        // a normal fetch that started before a forced one may finish after it
+        if (!cachedToken || token.expiresAt >= cachedToken.expiresAt) {
+          cachedToken = token;
+        }
         return token;
       })
       .finally(() => {
-        pendingToken = null;
+        pendingTokens[kind] = null;
       });
+    pendingTokens[kind] = pending;
   }
-  return (await pendingToken).accessToken;
+  return (await pending).accessToken;
 };

@@ -152,15 +152,25 @@ const setUp = async () => {
   };
 
   /** Runs the whole Google round trip and returns the session cookie. */
-  const signIn = async (returnTo = "/") => {
+  const signIn = async (returnTo = "/", extraCookies = "") => {
     const login = await request(
       `/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
     );
     const googleUrl = new URL(login.headers.get("location")!);
-    const loginCookie = cookieFrom(login, "exc_login")!;
+    // the raw Set-Cookie pair, as a browser would send it back
+    const loginCookie = login.headers
+      .getSetCookie()
+      .find((header) => header.startsWith("exc_login_"))!
+      .split(";")[0];
     const callback = await request(
       `/auth/callback?code=abc&state=${googleUrl.searchParams.get("state")}`,
-      { headers: { cookie: `exc_login=${encodeURIComponent(loginCookie)}` } },
+      {
+        headers: {
+          cookie: extraCookies
+            ? `${extraCookies}; ${loginCookie}`
+            : loginCookie,
+        },
+      },
     );
     return {
       callback,
@@ -260,6 +270,24 @@ describe("sign-in", () => {
     expect(session).toBeNull();
   });
 
+  it("lets two tabs sign in at the same time", async () => {
+    const first = await ctx.request("/auth/login");
+    const second = await ctx.request("/auth/login");
+    const cookies = [first, second]
+      .map((response) => response.headers.getSetCookie()[0].split(";")[0])
+      .join("; ");
+    const firstState = new URL(first.headers.get("location")!).searchParams.get(
+      "state",
+    );
+
+    const callback = await ctx.request(
+      `/auth/callback?code=abc&state=${firstState}`,
+      { headers: { cookie: cookies } },
+    );
+
+    expect(callback.status).toBe(302);
+  });
+
   it("rejects a callback whose state doesn't match the login cookie", async () => {
     const login = await ctx.request("/auth/login");
     const cookie = login.headers.getSetCookie()[0].split(";")[0];
@@ -272,28 +300,44 @@ describe("sign-in", () => {
   });
 
   it("never redirects off-site after sign-in", () => {
-    expect(sanitizeReturnTo("/drawings?x=1")).toBe("/drawings?x=1");
-    expect(sanitizeReturnTo("//evil.test")).toBe("/");
-    expect(sanitizeReturnTo("/\\evil.test")).toBe("/");
-    expect(sanitizeReturnTo("https://evil.test")).toBe("/");
-    expect(sanitizeReturnTo(null)).toBe("/");
+    const origin = "https://draw.acme.test";
+    expect(sanitizeReturnTo("/drawings?x=1#room=a,b", origin)).toBe(
+      "/drawings?x=1#room=a,b",
+    );
+    expect(sanitizeReturnTo("//evil.test", origin)).toBe("/");
+    expect(sanitizeReturnTo("/\\evil.test", origin)).toBe("/");
+    // browsers strip the tab and read this as //evil.test
+    expect(sanitizeReturnTo("/\t/evil.test", origin)).toBe("/");
+    expect(sanitizeReturnTo("/\n/evil.test", origin)).toBe("/");
+    expect(sanitizeReturnTo("https://evil.test", origin)).toBe("/");
+    expect(sanitizeReturnTo(null, origin)).toBe("/");
   });
 });
 
 describe("/auth/check (reverse proxy gate)", () => {
-  it("sends signed-out page loads to sign-in, keeping the original URL", async () => {
+  it("sends signed-out page loads to sign-in from a script, which can still see the #fragment", async () => {
     const response = await ctx.request("/auth/check", {
       headers: {
         accept: "text/html",
         "x-forwarded-method": "GET",
-        "x-forwarded-uri": "/#room=abc",
+        "x-forwarded-uri": "/",
       },
     });
+    const html = await response.text();
+    const nonce = html.match(/<script nonce="([^"]+)">/)?.[1];
 
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(
-      "/auth/login?returnTo=%2F%23room%3Dabc",
+    expect(response.status).toBe(401);
+    expect(html).toContain("location.hash");
+    expect(nonce).toBeTruthy();
+    expect(response.headers.get("content-security-policy")).toContain(
+      `script-src 'nonce-${nonce}'`,
     );
+  });
+
+  it("keeps the #fragment through Google and back", async () => {
+    const { callback } = await ctx.signIn("/#room=abc,KEY");
+
+    expect(callback.headers.get("location")).toBe("/#room=abc,KEY");
   });
 
   it("answers 401 to signed-out API and websocket requests", async () => {
@@ -333,6 +377,35 @@ describe("/auth/check (reverse proxy gate)", () => {
       (await ctx.request("/auth/check", ctx.withSession(session!))).status,
     ).toBe(401);
     expect(await readdir(path.join(ctx.dataDir, "sessions"))).toEqual([]);
+  });
+
+  it("doesn't retry Google on every request while it's down", async () => {
+    const { session } = await ctx.signIn();
+    ctx.fake.refreshResult = "down";
+    ctx.advance(2 * HOUR);
+
+    await ctx.request("/auth/check", ctx.withSession(session!));
+    await ctx.request("/auth/check", ctx.withSession(session!));
+    expect(ctx.fake.refreshCalls).toBe(1);
+
+    ctx.advance(6 * 60 * 1000);
+    await ctx.request("/auth/check", ctx.withSession(session!));
+    expect(ctx.fake.refreshCalls).toBe(2);
+  });
+
+  it("ignores another app's malformed cookie", async () => {
+    const { session } = await ctx.signIn("/", "tracker=100%");
+
+    const response = await ctx.request("/auth/check", {
+      headers: {
+        cookie: `tracker=100%; ${SESSION_COOKIE}=${encodeURIComponent(
+          session!,
+        )}`,
+      },
+    });
+
+    expect(session).toBeTruthy();
+    expect(response.status).toBe(200);
   });
 
   it("keeps sessions working through a short Google outage, but not indefinitely", async () => {
@@ -434,6 +507,17 @@ describe("sign-out and storage", () => {
     expect(
       (await ctx.request("/auth/me", ctx.withSession(session!))).status,
     ).toBe(401);
+  });
+
+  it("never writes a session back after it was deleted", async () => {
+    const { session } = await ctx.signIn();
+    const store = new FileSessionStore(ctx.dataDir, Buffer.alloc(32, 7));
+
+    const update = store.update(session!, { lastSeenAt: 1 });
+    const deletion = store.delete(session!);
+    await Promise.all([update, deletion]);
+
+    expect(await readdir(path.join(ctx.dataDir, "sessions"))).toEqual([]);
   });
 
   it("keeps no readable tokens or cookie values on disk", async () => {

@@ -167,6 +167,23 @@ export class DriveSync {
     }
   }
 
+  /**
+   * Call before signing out. Tabs and the next user of this browser share
+   * localStorage, so nothing may keep pointing at this user's Drive.
+   */
+  async prepareForSignOut() {
+    await this.syncNow();
+    this.unlink();
+    this.folderId = null;
+    this.setState({
+      connection: "signedOut",
+      drawings: [],
+      syncStatus: "idle",
+      lastSyncedAt: null,
+      error: null,
+    });
+  }
+
   async refreshDrawings() {
     if (!this.folderId) {
       return;

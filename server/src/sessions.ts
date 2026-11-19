@@ -37,6 +37,9 @@ export type SessionData = {
 export class FileSessionStore {
   private readonly dir: string;
   private readonly cache = new Map<string, SessionData>();
+  // read-merge-write must not interleave, or a slower write puts back stale
+  // tokens; updates to one session run one after another
+  private readonly updateChains = new Map<string, Promise<unknown>>();
 
   constructor(dataDir: string, private readonly key: Buffer) {
     this.dir = path.join(dataDir, "sessions");
@@ -84,19 +87,40 @@ export class FileSessionStore {
     return data;
   }
 
-  async update(sessionId: string, patch: Partial<SessionData>) {
-    const current = await this.get(sessionId);
-    if (!current) {
-      return null;
-    }
-    const next = { ...current, ...patch };
-    await this.write(sessionId, next);
-    return next;
+  private enqueue<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.updateChains.get(sessionId) ?? Promise.resolve();
+    const result = previous.then(run, run);
+    const chain = result.catch(() => {});
+    this.updateChains.set(sessionId, chain);
+    chain.then(() => {
+      if (this.updateChains.get(sessionId) === chain) {
+        this.updateChains.delete(sessionId);
+      }
+    });
+    return result;
   }
 
-  async delete(sessionId: string) {
-    this.cache.delete(sessionId);
-    await rm(this.filePath(sessionId), { force: true });
+  update(
+    sessionId: string,
+    patch: Partial<SessionData>,
+  ): Promise<SessionData | null> {
+    return this.enqueue(sessionId, async () => {
+      const current = await this.get(sessionId);
+      if (!current) {
+        return null;
+      }
+      const next = { ...current, ...patch };
+      await this.write(sessionId, next);
+      return next;
+    });
+  }
+
+  /** Queued behind pending updates, so none of them can write it back. */
+  delete(sessionId: string): Promise<void> {
+    return this.enqueue(sessionId, async () => {
+      this.cache.delete(sessionId);
+      await rm(this.filePath(sessionId), { force: true });
+    });
   }
 
   /** Removes sessions past either limit. File names are hashes, so decrypt each. */
