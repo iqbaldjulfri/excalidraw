@@ -10,7 +10,12 @@ export type Config = {
   googleClientId: string;
   googleClientSecret: string;
   /** Google Workspace domain whose accounts may sign in (the `hd` claim). */
-  allowedDomain: string;
+  allowedDomain: string | null;
+  /**
+   * Individual accounts let in regardless of domain, lowercased. Meant for
+   * testing with a personal Google Cloud project, or named exceptions.
+   */
+  allowedEmails: Set<string>;
   /** For the browser's Google Picker; both or neither. */
   picker: { apiKey: string; appId: string } | null;
   dataDir: string;
@@ -59,13 +64,24 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
   if (sessionSecret.length < 32) {
     throw new Error("SESSION_SECRET must be at least 32 characters");
   }
+  const allowedDomain = env.ALLOWED_DOMAIN?.trim().toLowerCase() || null;
+  const allowedEmails = new Set(
+    (env.ALLOWED_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (!allowedDomain && !allowedEmails.size) {
+    throw new Error("Set ALLOWED_DOMAIN, ALLOWED_EMAILS, or both");
+  }
 
   return {
     port: Number(env.PORT || 3015),
     publicUrl,
     googleClientId: required(env, "GOOGLE_CLIENT_ID"),
     googleClientSecret: required(env, "GOOGLE_CLIENT_SECRET"),
-    allowedDomain: required(env, "ALLOWED_DOMAIN").toLowerCase(),
+    allowedDomain,
+    allowedEmails,
     picker: loadPickerConfig(env),
     dataDir: env.DATA_DIR || "./data",
     // hashing lets any long random string serve as the secret

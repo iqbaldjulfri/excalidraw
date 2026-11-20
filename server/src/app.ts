@@ -10,7 +10,7 @@ import { isSessionExpired } from "./sessions";
 import { DailyUploadQuota, handleStorageRequest } from "./storageRoutes";
 
 import type { Config } from "./config";
-import type { GoogleOAuth } from "./google";
+import type { GoogleOAuth, IdTokenClaims } from "./google";
 import type { FileSessionStore, SessionData } from "./sessions";
 import type { DiskStorage } from "./storage";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -265,6 +265,17 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     return { id, data };
   };
 
+  const isAllowedAccount = (claims: IdTokenClaims) => {
+    if (claims.email_verified !== true) {
+      return false;
+    }
+    // hd, not the email domain, proves Workspace membership (Google's guidance)
+    const isInDomain =
+      !!config.allowedDomain &&
+      claims.hd?.toLowerCase() === config.allowedDomain;
+    return isInDomain || config.allowedEmails.has(claims.email.toLowerCase());
+  };
+
   const hasDriveAccess = (data: SessionData) =>
     data.grantedScopes.includes(DRIVE_FILE_SCOPE);
 
@@ -350,17 +361,15 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     }
 
     const { claims, refreshToken, tokens } = result;
-    // hd, not the email domain, proves Workspace membership (Google's guidance)
-    if (
-      claims.hd?.toLowerCase() !== config.allowedDomain ||
-      claims.email_verified !== true
-    ) {
+    if (!isAllowedAccount(claims)) {
       sendPage(
         res,
         403,
         page(
           "Account not allowed",
-          `Sign in with your ${config.allowedDomain} Google account.`,
+          config.allowedDomain
+            ? `Sign in with your ${config.allowedDomain} Google account.`
+            : "This Google account isn't allowed to sign in here.",
           retry,
         ),
         { "Set-Cookie": clearLogin },
