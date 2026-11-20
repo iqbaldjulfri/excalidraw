@@ -345,6 +345,13 @@ export class DriveSync {
       if (isStale()) {
         return;
       }
+      const name = toDrawingName(metadata.name);
+      if (name !== current.name) {
+        api.updateScene({
+          appState: { name },
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
+      }
       let driveHash = this.lastSyncedHash;
       let version = current.version;
 
@@ -397,7 +404,7 @@ export class DriveSync {
       this.lastSyncedHash = localHash;
       this.lastSyncedIds = new Set(elements.map((element) => element.id));
       if (this.getState().current?.fileId === current.fileId) {
-        this.setCurrent({ ...current, version });
+        this.setCurrent({ ...current, name, version });
       }
       this.setState({ syncStatus: "synced", lastSyncedAt: Date.now() });
     } catch (error) {
@@ -552,14 +559,20 @@ export class DriveSync {
     });
   }
 
-  /** `fromCanvas` uploads the current canvas; otherwise starts a blank one. */
-  createDrawing(opts: { fromCanvas: boolean }) {
+  /**
+   * `fromCanvas` uploads the current canvas; otherwise starts a blank one.
+   * Without a `name` the drawing is "Untitled drawing", numbered if taken.
+   */
+  createDrawing(opts: { fromCanvas: boolean; name?: string }) {
     return this.runBusy(async () => {
       const api = this.api;
       const { saveFolder } = this.getState();
       if (!api || !saveFolder) {
         return;
       }
+      // decided before resetScene: its state update hasn't applied yet when
+      // it returns, so reading the name afterwards gets the previous drawing's
+      const name = opts.name?.trim() || this.nextUntitledName();
       if (!opts.fromCanvas) {
         if (!(await this.prepareToReplaceCanvas())) {
           return;
@@ -576,17 +589,14 @@ export class DriveSync {
       } else {
         this.unlink();
       }
+      api.updateScene({
+        appState: { name },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
       const elements = api.getSceneElementsIncludingDeleted();
-      const name = this.uniqueDrawingName(api.getName());
-      if (name !== api.getName()) {
-        api.updateScene({
-          appState: { name },
-          captureUpdate: CaptureUpdateAction.NEVER,
-        });
-      }
       const content = serializeDriveScene(
         elements,
-        api.getAppState(),
+        { ...api.getAppState(), name },
         api.getFiles(),
       );
       let created: DriveDrawing;
@@ -657,16 +667,23 @@ export class DriveSync {
     }
   }
 
-  /** The default name only changes once a minute, so it collides easily. */
-  private uniqueDrawingName(name: string) {
+  /**
+   * Only untitled drawings get numbered. Drive tells files apart by id, so a
+   * name the user typed is kept as typed even if another file has it.
+   */
+  private nextUntitledName() {
     const taken = new Set(
       this.getState().drawings.map((drawing) => toDrawingName(drawing.name)),
     );
-    let candidate = name;
-    for (let suffix = 2; taken.has(candidate); suffix++) {
-      candidate = `${name} (${suffix})`;
+    const base = t("googleDrive.untitled");
+    if (!taken.has(base)) {
+      return base;
     }
-    return candidate;
+    let number = 2;
+    while (taken.has(t("googleDrive.untitledNumbered", { number }))) {
+      number++;
+    }
+    return t("googleDrive.untitledNumbered", { number });
   }
 
   renameDrawing(fileId: string, name: string) {

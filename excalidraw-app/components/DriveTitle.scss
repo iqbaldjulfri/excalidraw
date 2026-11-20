@@ -1,0 +1,210 @@
+.excalidraw {
+  .drive-title {
+    // renderTopLeftUI renders before the main menu; the title belongs after it
+    order: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    max-width: min(24rem, 40vw);
+    height: var(--lg-button-size);
+    padding-inline: 0.75rem 0.25rem;
+    border-radius: var(--border-radius-lg);
+    background-color: var(--island-bg-color);
+    box-shadow: var(--shadow-island);
+    color: var(--text-primary-color);
+    font-size: 0.875rem;
+  }
+
+  .drive-title--mobile {
+    max-width: 50vw;
+  }
+
+  .drive-title__dot {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background-color: var(--color-gray-40);
+
+    &[data-status="synced"] {
+      background-color: var(--color-success);
+    }
+
+    &[data-status="syncing"] {
+      background-color: var(--color-primary);
+      animation: drive-title-pulse 0.9s ease-in-out infinite alternate;
+    }
+
+    &[data-status="error"] {
+      background-color: var(--color-warning);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      animation: none;
+    }
+  }
+
+  .drive-title__name {
+    min-width: 0;
+    margin-inline-start: -0.375rem;
+    padding: 0.25rem 0.375rem;
+    border: 0;
+    border-radius: var(--border-radius-md);
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: text;
+
+    &:hover:not(:disabled) {
+      background-color: var(--button-hover-bg);
+    }
+
+    &:disabled {
+      cursor: default;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 1px;
+    }
+  }
+
+  .drive-title__name--empty {
+    color: var(--color-gray-50);
+    font-weight: 500;
+    font-style: italic;
+    cursor: pointer;
+  }
+
+  .drive-title__input {
+    min-width: 0;
+    max-width: 100%;
+    margin-inline-start: -0.375rem;
+    padding: 0.1875rem 0.375rem;
+    border: 1px solid var(--color-primary);
+    border-radius: var(--border-radius-md);
+    background-color: var(--input-bg-color);
+    color: var(--text-primary-color);
+    box-shadow: 0 0 0 3px var(--color-primary-light);
+    font: inherit;
+    font-weight: 600;
+    outline: none;
+
+    &::placeholder {
+      color: var(--color-gray-50);
+      font-weight: 500;
+      font-style: italic;
+    }
+  }
+
+  .drive-title__status {
+    flex: none;
+    color: var(--color-gray-50);
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .drive-title__menu-button {
+    flex: none;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--border-radius-md);
+    background: none;
+    box-shadow: none;
+    color: var(--color-gray-50);
+
+    &:hover,
+    &[data-state="open"] {
+      background-color: var(--button-hover-bg);
+      color: var(--text-primary-color);
+    }
+
+    svg {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+
+  .drive-title__menu {
+    width: 18rem;
+    max-width: calc(100vw - 2rem);
+  }
+
+  .drive-title__menu-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.25rem 0.5rem 0.5rem;
+
+    strong {
+      font-size: 0.875rem;
+      overflow-wrap: anywhere;
+    }
+
+    span {
+      color: var(--color-gray-50);
+      font-size: 0.75rem;
+      line-height: 1.4;
+    }
+  }
+
+  .drive-title__menu-error {
+    color: var(--color-danger) !important;
+  }
+
+  .drive-title__recent-name {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .drive-title__menu-note {
+    padding: 0.25rem 0.5rem;
+    color: var(--color-gray-50);
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .drive-title__menu-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+
+    span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .drive-title__link {
+    flex: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-primary);
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+@keyframes drive-title-pulse {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}

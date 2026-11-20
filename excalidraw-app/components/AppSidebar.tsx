@@ -5,12 +5,8 @@ import {
 } from "@excalidraw/excalidraw/components/icons";
 import { LinkButton } from "@excalidraw/excalidraw/components/LinkButton";
 import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
-import { useI18n } from "@excalidraw/excalidraw/i18n";
 
 import { isSelfHosted } from "../app_constants";
-import { isGoogleDriveEnabled } from "../data/googleDrive/auth";
-
-import { DriveSidebarTab, driveIcon } from "./DriveSidebarTab";
 
 import "./AppSidebar.scss";
 
@@ -73,21 +69,10 @@ const SidebarPromoCopy = (props: SidebarPromoCopyProps) => {
 
 export const AppSidebar = () => {
   const { theme, openSidebar } = useUIAppState();
-  const { t } = useI18n();
-  const isDriveEnabled = isGoogleDriveEnabled();
 
   return (
     <DefaultSidebar>
       <DefaultSidebar.TabTriggers>
-        {isDriveEnabled && (
-          <Sidebar.TabTrigger
-            tab="googleDrive"
-            title={t("googleDrive.tab")}
-            style={{ opacity: openSidebar?.tab === "googleDrive" ? 1 : 0.4 }}
-          >
-            {driveIcon}
-          </Sidebar.TabTrigger>
-        )}
         {!isSelfHosted && (
           <>
             <Sidebar.TabTrigger
@@ -105,11 +90,6 @@ export const AppSidebar = () => {
           </>
         )}
       </DefaultSidebar.TabTriggers>
-      {isDriveEnabled && (
-        <Sidebar.Tab tab="googleDrive">
-          <DriveSidebarTab />
-        </Sidebar.Tab>
-      )}
       {!isSelfHosted && (
         <>
           <Sidebar.Tab tab="comments">
