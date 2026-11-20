@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { createAuthApp, sanitizeReturnTo, SESSION_COOKIE } from "./app";
+import { loadConfig } from "./config";
 import { DRIVE_FILE_SCOPE, GOOGLE_ENDPOINTS, GoogleOAuth } from "./google";
 import { FileSessionStore } from "./sessions";
 import { DiskStorage } from "./storage";
@@ -125,6 +126,7 @@ const setUp = async () => {
     googleClientId: CLIENT_ID,
     googleClientSecret: "secret",
     allowedDomain: DOMAIN,
+    allowedEmails: new Set(["guest@gmail.com"]),
     picker: { apiKey: "browser-key", appId: "1234567890" },
     dataDir,
     encryptionKey: Buffer.alloc(32, 7),
@@ -141,7 +143,7 @@ const setUp = async () => {
     clientId: CLIENT_ID,
     clientSecret: "secret",
     redirectUri: `${publicUrl.origin}/auth/callback`,
-    allowedDomain: DOMAIN,
+    accountChooserDomain: DOMAIN,
     fetch: fakeFetch,
     now,
   });
@@ -208,6 +210,7 @@ const setUp = async () => {
     fake,
     dataDir,
     storage,
+    config,
     request,
     signIn,
     withSession,
@@ -275,6 +278,41 @@ describe("sign-in", () => {
     const { callback, session } = await ctx.signIn();
 
     expect(callback.status).not.toBe(302);
+    expect(session).toBeNull();
+  });
+
+  it("lets in an individually allowed account from outside the domain", async () => {
+    ctx.fake.idTokenClaims = { hd: undefined, email: "Guest@Gmail.com" };
+
+    const { callback, session } = await ctx.signIn();
+
+    expect(callback.status).toBe(302);
+    expect(session).toBeTruthy();
+  });
+
+  it("signs someone out once they're taken off the allowed accounts", async () => {
+    ctx.fake.idTokenClaims = { hd: undefined, email: "guest@gmail.com" };
+    const { session } = await ctx.signIn();
+    expect(
+      (await ctx.request("/auth/check", ctx.withSession(session!))).status,
+    ).toBe(200);
+
+    ctx.config.allowedEmails.delete("guest@gmail.com");
+
+    expect(
+      (await ctx.request("/auth/check", ctx.withSession(session!))).status,
+    ).toBe(401);
+  });
+
+  it("still requires an allowed account's email to be verified", async () => {
+    ctx.fake.idTokenClaims = {
+      hd: undefined,
+      email: "guest@gmail.com",
+      email_verified: false,
+    };
+
+    const { session } = await ctx.signIn();
+
     expect(session).toBeNull();
   });
 
@@ -803,5 +841,31 @@ describe("DailyUploadQuota", () => {
 
     time += 24 * HOUR;
     expect(() => quota.consume("alice", 100)).not.toThrow();
+  });
+});
+
+describe("loadConfig", () => {
+  const base = {
+    PUBLIC_URL: "https://draw.acme.test",
+    GOOGLE_CLIENT_ID: "id",
+    GOOGLE_CLIENT_SECRET: "secret",
+    SESSION_SECRET: "x".repeat(32),
+  };
+
+  it("needs a domain or individual accounts to let anyone in", () => {
+    expect(() => loadConfig(base)).toThrow(/ALLOWED_DOMAIN, ALLOWED_EMAILS/);
+  });
+
+  it("accepts individual accounts alone, normalized", () => {
+    const config = loadConfig({
+      ...base,
+      ALLOWED_EMAILS: " Me@Gmail.com, friend@gmail.com ,",
+    });
+
+    expect(config.allowedDomain).toBeNull();
+    expect([...config.allowedEmails]).toEqual([
+      "me@gmail.com",
+      "friend@gmail.com",
+    ]);
   });
 });

@@ -72,7 +72,8 @@ export class GoogleOAuth {
       clientId: string;
       clientSecret: string;
       redirectUri: string;
-      allowedDomain: string;
+      /** Pre-filters Google's account chooser; null shows every account. */
+      accountChooserDomain: string | null;
       fetch?: FetchFn;
       now?: () => number;
     },
@@ -99,9 +100,11 @@ export class GoogleOAuth {
       access_type: "offline",
       prompt: "consent select_account",
       include_granted_scopes: "true",
-      // only a hint for the account chooser; the hd claim is what's enforced
-      hd: this.opts.allowedDomain,
     });
+    if (this.opts.accountChooserDomain) {
+      // only a hint for the account chooser; the hd claim is what's enforced
+      params.set("hd", this.opts.accountChooserDomain);
+    }
     return `${GOOGLE_ENDPOINTS.authorize}?${params}`;
   }
 

@@ -14,7 +14,8 @@ const google = new GoogleOAuth({
   clientId: config.googleClientId,
   clientSecret: config.googleClientSecret,
   redirectUri: new URL("/auth/callback", config.publicUrl).toString(),
-  allowedDomain: config.allowedDomain,
+  // with individually allowed accounts, a domain hint would hide them
+  accountChooserDomain: config.allowedEmails.size ? null : config.allowedDomain,
 });
 
 const storage = new DiskStorage(config.dataDir);

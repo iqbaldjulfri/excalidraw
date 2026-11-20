@@ -36,7 +36,8 @@ Do this in a Google Cloud project owned by your Workspace organization.
 | `PUBLIC_URL` | yes | Origin users open, e.g. `https://draw.example.com` |
 | `GOOGLE_CLIENT_ID` | yes | From step 5 |
 | `GOOGLE_CLIENT_SECRET` | yes | From step 5 |
-| `ALLOWED_DOMAIN` | yes | Workspace domain, e.g. `example.com`, matched against Google's `hd` claim |
+| `ALLOWED_DOMAIN` | one of these two | Workspace domain, e.g. `example.com`, matched against Google's `hd` claim |
+| `ALLOWED_EMAILS` | one of these two | Comma-separated accounts let in regardless of domain, e.g. for testing with personal accounts. Leave empty in production unless you mean to make named exceptions. List Gmail or Workspace addresses: a Google account registered with another provider's email can stay "verified" after that address changes hands. Removing an account signs it out on its next request |
 | `GOOGLE_PICKER_API_KEY` | no | From step 6. Without it the picker buttons are hidden |
 | `GOOGLE_PROJECT_NUMBER` | no | From step 6. Set both picker variables or neither |
 | `SESSION_SECRET` | yes | Random string of 32+ characters: `openssl rand -base64 48` |
@@ -61,6 +62,16 @@ This server also replaces Firebase and the public share-link backend, so drawing
 Every request needs a signed-in session, checked by this server itself. Saving a room also needs a token the browser derives from the room key, pinned by the room's first save, so a coworker who only knows a room's id can't overwrite it. Each user may upload up to 1 GiB of share links and images per day (counted in memory, reset on restart) so a runaway script can't fill the disk. Once an hour it deletes share links and rooms that nobody has opened for `RETENTION_DAYS`, along with their images. Nothing is backed up.
 
 Build the app with `VITE_APP_STORAGE_URL=/api`, `VITE_APP_BACKEND_V2_GET_URL=/api/v2/` and `VITE_APP_BACKEND_V2_POST_URL=/api/v2/post/` to use it.
+
+## Testing without a Workspace admin
+
+If your company account can't create a Google Cloud project, you can test with a personal Google account instead. Google's setup is the same as above except:
+
+- Create the project while signed in to your personal account. Its parent resource is "No organization".
+- In **Audience**, choose **External**, leave the publishing status at **Testing**, and add every account that will sign in under **Test users**.
+- In `server/.env`, leave `ALLOWED_DOMAIN` empty and list those accounts in `ALLOWED_EMAILS`.
+
+In Testing mode Google's refresh tokens expire after 7 days, so expect to sign in again weekly. Use this only for testing: the production project should be Internal to your Workspace, with `ALLOWED_DOMAIN` set.
 
 ## Local development
 
