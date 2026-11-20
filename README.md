@@ -9,6 +9,8 @@ This is [Excalidraw](https://github.com/excalidraw/excalidraw) with Google integ
 
 To run it, see [`deploy/README.md`](deploy/README.md). The Google Cloud setup and server settings are in [`server/README.md`](server/README.md).
 
+Found a security problem in this fork, such as a way past the sign-in or into someone else's drawings? [Report it privately](https://github.com/iqbaldjulfri/excalidraw-inhouse/security/advisories/new) instead of posting it anywhere public.
+
 Everything below is the upstream Excalidraw README.
 
 ---
