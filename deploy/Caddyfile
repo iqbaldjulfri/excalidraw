@@ -1,4 +1,6 @@
-{$DOMAIN} {
+# Plain HTTP: Cloudflare terminates TLS and cloudflared forwards here over the
+# compose network, so Caddy never needs a certificate.
+:80 {
 	encode zstd gzip
 
 	# sign-in and stored drawings; the auth server checks sessions itself
@@ -12,7 +14,7 @@
 		forward_auth auth:3015 {
 			uri /auth/check
 		}
-		reverse_proxy room:80
+		reverse_proxy room:3002
 	}
 
 	# the app; signed-out visitors get the auth server's sign-in page, which
