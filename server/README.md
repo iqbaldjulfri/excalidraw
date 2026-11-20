@@ -75,15 +75,36 @@ In Testing mode Google's refresh tokens expire after 7 days, so expect to sign i
 
 ## Local development
 
+Fill in the Google client, then start this server:
+
 ```bash
-cp server/.env.example server/.env   # then fill in the Google client
+cp server/.env.example server/.env
 yarn --cwd server dev
 ```
 
-In a second terminal:
+Live collaboration needs the `excalidraw-room` relay. Production puts it behind the proxy at `/socket.io`; locally it runs on its own port:
 
 ```bash
-VITE_APP_AUTH_ENABLED=true yarn start
+docker run -d --name excalidraw-room -p 3003:80 -e PORT=80 excalidraw/excalidraw-room:latest
 ```
 
-The dev server proxies `/auth` to this server, so open `http://localhost:3001`.
+In a second terminal, start the app with the same flags `deploy/app.Dockerfile` builds with, plus the relay's address:
+
+```bash
+VITE_APP_SELF_HOSTED=true \
+VITE_APP_AUTH_ENABLED=true \
+VITE_APP_STORAGE_URL=/api \
+VITE_APP_BACKEND_V2_GET_URL=/api/v2/ \
+VITE_APP_BACKEND_V2_POST_URL=/api/v2/post/ \
+VITE_APP_FIREBASE_CONFIG={} \
+VITE_APP_ENABLE_TRACKING=false \
+VITE_APP_DISABLE_SENTRY=true \
+VITE_APP_WS_SERVER_URL=http://localhost:3003 \
+yarn start
+```
+
+Without `VITE_APP_SELF_HOSTED` the app shows the Excalidraw+ links and no Drive sidebar. The dev server proxies `/auth` and `/api` to this server, so open `http://localhost:3001`. Next time, `docker start excalidraw-room` brings the relay back.
+
+Locally the relay doesn't check sign-in, since nothing runs `/auth/check` in front of it. The room key never reaches it either way.
+
+To try collaboration with several accounts, list them in `ALLOWED_EMAILS` (and as test users if the app is in Testing), then sign each one in from a separate browser profile or a private window, and open the same collab link.
