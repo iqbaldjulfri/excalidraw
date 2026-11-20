@@ -4,16 +4,25 @@ This folder runs the whole app on one Linux server with Docker. Only accounts in
 
 | Service | Does |
 | --- | --- |
-| `caddy` | HTTPS (certificates from Let's Encrypt) and routing; asks `auth` before serving anything |
+| `cloudflared` | Connects out to Cloudflare, which serves HTTPS and forwards requests through the tunnel |
+| `caddy` | Routing; asks `auth` before serving anything |
 | `app` | The Excalidraw app, built with Excalidraw+ and AI features hidden |
 | `auth` | Google sign-in, Drive tokens and storage (see [`server/README.md`](../server/README.md)) |
-| `room` | `excalidraw-room`, which relays live collaboration between browsers |
+| `room` | `excalidraw-room`, which relays live collaboration between browsers. Built from source by [`room.Dockerfile`](room.Dockerfile), because the published image runs only on amd64 |
 
 ## You need
 
-- A Linux server with Docker and Docker Compose, with ports 80 and 443 open to your users.
-- A domain name, such as `draw.example.com`, whose DNS points at the server. Caddy needs it to get a certificate.
+- A Linux server with Docker and Docker Compose, amd64 or arm64 (such as EC2 Graviton). It needs outbound internet access but no inbound ports: close 80 and 443 in its firewall or security group.
+- A domain on Cloudflare and a Cloudflare Tunnel for it, set up as below.
 - The Google Cloud setup from [`server/README.md`](../server/README.md#google-cloud-setup-workspace-admin), done by a Workspace admin. Use `https://<your domain>/auth/callback` as the redirect URI.
+
+## Cloudflare Tunnel setup
+
+1. In the Cloudflare dashboard, go to **Networking > Tunnels** and create a tunnel.
+2. Open the tunnel, select **Add a replica**, and copy the install command without running it. The token is the `eyJ...` string in it. Put it in `.env` as `TUNNEL_TOKEN`.
+3. Under **Routes**, add a **Published application**: your hostname (such as `draw.example.com`) with service URL `http://caddy:80`. Cloudflare creates the DNS record.
+
+`DOMAIN` in `.env` must match that hostname.
 
 ## Start it
 
@@ -54,4 +63,6 @@ git pull
 docker compose up -d --build
 ```
 
-Changing `SESSION_SECRET` signs everyone out. Changing `DOMAIN` needs a matching redirect URI in Google Cloud.
+Changing `SESSION_SECRET` signs everyone out. Changing `DOMAIN` needs a matching tunnel route and a matching redirect URI in Google Cloud.
+
+The collab server is pinned to an upstream commit by `ROOM_COMMIT` in [`room.Dockerfile`](room.Dockerfile). Change that line to update it.
