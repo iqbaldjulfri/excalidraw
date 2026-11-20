@@ -37,7 +37,7 @@ Do this in a Google Cloud project owned by your Workspace organization.
 | `GOOGLE_CLIENT_ID` | yes | From step 5 |
 | `GOOGLE_CLIENT_SECRET` | yes | From step 5 |
 | `ALLOWED_DOMAIN` | one of these two | Workspace domain, e.g. `example.com`, matched against Google's `hd` claim |
-| `ALLOWED_EMAILS` | one of these two | Comma-separated accounts let in regardless of domain, e.g. for testing with personal accounts. Leave empty in production unless you mean to make named exceptions |
+| `ALLOWED_EMAILS` | one of these two | Comma-separated accounts let in regardless of domain, e.g. for testing with personal accounts. Leave empty in production unless you mean to make named exceptions. List Gmail or Workspace addresses: a Google account registered with another provider's email can stay "verified" after that address changes hands. Removing an account signs it out on its next request |
 | `GOOGLE_PICKER_API_KEY` | no | From step 6. Without it the picker buttons are hidden |
 | `GOOGLE_PROJECT_NUMBER` | no | From step 6. Set both picker variables or neither |
 | `SESSION_SECRET` | yes | Random string of 32+ characters: `openssl rand -base64 48` |

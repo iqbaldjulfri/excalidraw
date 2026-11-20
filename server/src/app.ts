@@ -229,7 +229,19 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     }
     const time = now();
     if (
-      isSessionExpired(data, time, config.sessionMaxAgeMs, config.sessionIdleMs)
+      isSessionExpired(
+        data,
+        time,
+        config.sessionMaxAgeMs,
+        config.sessionIdleMs,
+      ) ||
+      // the allowed domain or accounts may have changed since sign-in, e.g.
+      // someone taken off ALLOWED_EMAILS
+      !isAllowedAccount({
+        email: data.user.email,
+        email_verified: true,
+        hd: data.user.hd ?? undefined,
+      })
     ) {
       await sessions.delete(id);
       return null;
@@ -265,7 +277,9 @@ export const createAuthApp = (deps: AuthAppDeps) => {
     return { id, data };
   };
 
-  const isAllowedAccount = (claims: IdTokenClaims) => {
+  const isAllowedAccount = (
+    claims: Pick<IdTokenClaims, "email" | "email_verified" | "hd">,
+  ) => {
     if (claims.email_verified !== true) {
       return false;
     }
@@ -393,6 +407,7 @@ export const createAuthApp = (deps: AuthAppDeps) => {
         email: claims.email,
         name: claims.name || claims.email,
         picture: claims.picture ?? null,
+        hd: claims.hd ?? null,
       },
       refreshToken,
       accessToken: tokens.accessToken,

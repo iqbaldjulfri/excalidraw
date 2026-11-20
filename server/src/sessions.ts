@@ -19,6 +19,8 @@ export type SessionUser = {
   email: string;
   name: string;
   picture: string | null;
+  /** Workspace domain from the ID token, kept to re-check access later. */
+  hd: string | null;
 };
 
 export type SessionData = {

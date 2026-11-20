@@ -210,6 +210,7 @@ const setUp = async () => {
     fake,
     dataDir,
     storage,
+    config,
     request,
     signIn,
     withSession,
@@ -287,6 +288,20 @@ describe("sign-in", () => {
 
     expect(callback.status).toBe(302);
     expect(session).toBeTruthy();
+  });
+
+  it("signs someone out once they're taken off the allowed accounts", async () => {
+    ctx.fake.idTokenClaims = { hd: undefined, email: "guest@gmail.com" };
+    const { session } = await ctx.signIn();
+    expect(
+      (await ctx.request("/auth/check", ctx.withSession(session!))).status,
+    ).toBe(200);
+
+    ctx.config.allowedEmails.delete("guest@gmail.com");
+
+    expect(
+      (await ctx.request("/auth/check", ctx.withSession(session!))).status,
+    ).toBe(401);
   });
 
   it("still requires an allowed account's email to be verified", async () => {
