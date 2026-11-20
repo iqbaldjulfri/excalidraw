@@ -646,3 +646,68 @@ describe("DriveSync cold-review fixes", () => {
     expect(appJotaiStore.get(driveStateAtom).current).toBeNull();
   });
 });
+
+describe("DriveSync drawing names", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  const base = {
+    local: scene(rect("a", 1)),
+    remote: scene(rect("a", 1)),
+    linkedVersion: "7",
+    remoteVersion: "7",
+  };
+
+  it("names a new drawing Untitled, not after the drawing that was open", async () => {
+    const { sync, client, api } = await setUpSync(base);
+    // resetScene's state update lands after it returns, so getName still
+    // reports the previous drawing; this is what produced "Plan (2)"
+    api.getName = () => "Plan";
+
+    await sync.createDrawing({ fromCanvas: false });
+
+    expect(client.createDrawing.mock.calls[0][0].name).toBe("Untitled drawing");
+    expect(appJotaiStore.get(driveStateAtom).current?.name).toBe(
+      "Untitled drawing",
+    );
+  });
+
+  it("numbers untitled drawings when the name is taken", async () => {
+    const { sync, client } = await setUpSync(base);
+    client.listDrawings.mockResolvedValueOnce([
+      { ...drawingMeta("1"), id: "u1", name: "Untitled drawing.excalidraw" },
+      { ...drawingMeta("1"), id: "u2", name: "Untitled drawing 2.excalidraw" },
+    ]);
+    await sync.refreshDrawings();
+
+    await sync.createDrawing({ fromCanvas: true });
+
+    expect(client.createDrawing.mock.calls[0][0].name).toBe(
+      "Untitled drawing 3",
+    );
+  });
+
+  it("keeps a typed name as typed, even if another drawing has it", async () => {
+    const { sync, client } = await setUpSync(base);
+
+    await sync.createDrawing({ fromCanvas: true, name: "  Plan  " });
+
+    expect(client.createDrawing.mock.calls[0][0].name).toBe("Plan");
+  });
+
+  it("picks up a rename made in Drive on the next sync", async () => {
+    const { sync, client, api } = await setUpSync(base);
+    client.getDrawingMetadata.mockResolvedValueOnce({
+      ...drawingMeta("7"),
+      name: "Roadmap.excalidraw",
+    });
+
+    await sync.syncNow();
+
+    expect(appJotaiStore.get(driveStateAtom).current?.name).toBe("Roadmap");
+    expect(api.updateScene).toHaveBeenCalledWith(
+      expect.objectContaining({ appState: { name: "Roadmap" } }),
+    );
+  });
+});

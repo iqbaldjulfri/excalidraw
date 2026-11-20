@@ -799,8 +799,15 @@
   },
   "googleDrive": {
     "title": "Google Drive",
-    "tab": "Google Drive",
-    "notLinked": "This canvas isn't saved to Drive yet.",
+    "untitled": "Untitled drawing",
+    "untitledNumbered": "Untitled drawing {{number}}",
+    "notInDrive": "Not saved to Drive",
+    "notInDriveHint": "This canvas is only in this browser. Save it to Drive to keep it and open it elsewhere.",
+    "menu": "Drawing menu",
+    "nameField": "Drawing name",
+    "renameHint": "Rename",
+    "recent": "Recent drawings",
+    "documentTitle": "{{name}} - Excalidraw",
     "connecting": "Connecting to Google Drive…",
     "signedOut": "Your session has ended. Your changes are kept in this browser and sync once you sign in again.",
     "driveNotGranted": "Google Drive access wasn't allowed when you signed in. Sign in again and tick Google Drive on Google's consent screen.",
@@ -809,11 +816,17 @@
       "syncing": "Saving…",
       "synced": "Saved {{time}}",
       "waiting": "Not saved yet",
-      "error": "Couldn't save"
+      "error": "Couldn't save",
+      "short": {
+        "syncing": "Saving…",
+        "synced": "Saved",
+        "waiting": "Not saved yet",
+        "error": "Not saved",
+        "disconnected": "Drive disconnected"
+      }
     },
     "actions": {
       "newDrawing": "New drawing",
-      "saveCanvas": "Save canvas to Drive",
       "stopSyncing": "Stop syncing",
       "rename": "Rename",
       "trash": "Move to Drive trash",
@@ -821,10 +834,10 @@
       "signInAgain": "Sign in again",
       "retry": "Try again",
       "openFromDrive": "Open from Drive…",
-      "changeFolder": "Change"
+      "changeFolder": "Change",
+      "saveToDrive": "Save to Drive"
     },
     "list": {
-      "current": "Open now",
       "empty": "No drawings in Drive yet."
     },
     "replaceCanvas": {

@@ -152,6 +152,7 @@ import "./index.scss";
 
 import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
+import { DriveTitle } from "./components/DriveTitle";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -1024,6 +1025,7 @@ const ExcalidrawWrapper = () => {
         autoFocus={true}
         theme={editorTheme}
         onThemeChange={setAppTheme}
+        renderTopLeftUI={(isMobile) => <DriveTitle isMobile={isMobile} />}
         renderTopRightUI={(isMobile) => {
           if (isMobile || !collabAPI || !isCollabAvailable) {
             return null;
