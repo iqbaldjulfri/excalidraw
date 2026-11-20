@@ -103,7 +103,7 @@ VITE_APP_WS_SERVER_URL=http://localhost:3003 \
 yarn start
 ```
 
-Without `VITE_APP_SELF_HOSTED` the app shows the Excalidraw+ links and no Drive sidebar. The dev server proxies `/auth` and `/api` to this server, so open `http://localhost:3001`. Next time, `docker start excalidraw-room` brings the relay back.
+Without `VITE_APP_SELF_HOSTED` the app shows the Excalidraw+ links and the AI features this build is meant to hide. The dev server proxies `/auth` and `/api` to this server, so open `http://localhost:3001`. Next time, `docker start excalidraw-room` brings the relay back.
 
 Locally the relay doesn't check sign-in, since nothing runs `/auth/check` in front of it. The room key never reaches it either way.
 
